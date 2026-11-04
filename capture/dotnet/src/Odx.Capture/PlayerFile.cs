@@ -4,7 +4,11 @@ using Odx.Core;
 namespace Odx.Capture;
 
 /// <summary>Who recorded a capture: the player's id and name in the room; null for a capture outside a room.</summary>
-public sealed record PlayerIdentity(string PlayerId, string Name);
+public sealed record PlayerIdentity(string PlayerId, string Name)
+{
+    /// <summary>A player id names the delivered players/&lt;id&gt;/ folder (spec v3 §1): lowercase letters, digits, '-' and '_', 1–32 long.</summary>
+    public static bool IsValidId(string id) => System.Text.RegularExpressions.Regex.IsMatch(id, "^[a-z0-9][a-z0-9_-]{0,31}$");
+}
 
 /// <summary>
 /// player.json of a player's round folder, as in the client's multiplayer delivery (sample round

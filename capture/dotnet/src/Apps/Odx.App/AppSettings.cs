@@ -26,7 +26,10 @@ public sealed class AppSettings
     /// <summary>Game profile JSON used to build the session after recording; null skips the build.</summary>
     public string? GameProfile { get; set; }
     public Hotkey Hotkey { get; set; } = Hotkey.Default;
-    public string PlayerId { get; set; } = Environment.MachineName.ToLowerInvariant();
+    /// <summary>Both typed by the player (spec v3 §2.1 player.json names the player): no default, so a machine name or a
+    /// Windows user name never stands in for them.</summary>
+    public string PlayerId { get; set; } = "";
+    public string PlayerName { get; set; } = "";
 
     /// <param name="timeServer">time_server of odx-capture.json; null uses the Windows clock only.</param>
     /// <remarks>Recordings go to the package's data\captures\ (<see cref="PackageFolders"/>).</remarks>

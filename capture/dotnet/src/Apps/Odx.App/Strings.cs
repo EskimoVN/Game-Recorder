@@ -35,6 +35,9 @@ public sealed class Strings
     public required string GameTooltip { get; init; }
     public required string HotkeyTooltip { get; init; }
     public required string PlayerId { get; init; }
+    public required string PlayerIdTooltip { get; init; }
+    public required string PlayerName { get; init; }
+    public required string PlayerNameTooltip { get; init; }
     public required string Room { get; init; }
     public required string RoomTooltip { get; init; }
     public required string EnterInviteCode { get; init; }
@@ -96,7 +99,7 @@ public sealed class Strings
     public required Func<string, string> HostHint { get; init; }
     public required Func<string, string, string> RoundKept { get; init; }
     public required Func<string, string, string> RoundCaptureFailed { get; init; }
-    public required string InvalidRoomCode { get; init; }
+    public required string PlayerIdentityRequired { get; init; }
     public required string JoiningRoom { get; init; }
     public required Func<string, bool, string, string> RoomStatus { get; init; }
     public required Func<string, string> StartRound { get; init; }
@@ -141,6 +144,9 @@ public sealed class Strings
         GameTooltip = "Builds frames.csv + session.json after recording and validates them",
         HotkeyTooltip = "Click, then press the new key combination",
         PlayerId = "Player ID",
+        PlayerIdTooltip = "Names your folder in the delivered session: 1-32 lowercase letters, digits, - or _ (e.g. p1, thanh)",
+        PlayerName = "Name",
+        PlayerNameTooltip = "Your name as written in player.json, so the client can tell the players apart",
         Room = "Room",
         RoomTooltip = "This room's invite code: send it to the other players",
         EnterInviteCode = "Invite code from the room's host (6 characters):",
@@ -214,7 +220,7 @@ public sealed class Strings
         HostHint = hotkey => $"Host: once everyone is ready (✓), press {hotkey} to start the round; again to end it.",
         RoundKept = (session, dir) => $"✓ Round {session}: recorded, kept in {dir}",
         RoundCaptureFailed = (session, dir) => $"✗ Round {session}: capture failed (what was recorded stays in {dir})",
-        InvalidRoomCode = "Fill in your Player ID first.",
+        PlayerIdentityRequired = "Fill in your Player ID (1-32 lowercase letters, digits, - or _) and your Name first.",
         JoiningRoom = "Joining the room…",
         RoomStatus = (code, host, members) => $"Room {code}{(host ? " · you are the host: share this invite code" : "")}\nPlayers: {members}",
         StartRound = hotkey => $"Start round ({hotkey})",
@@ -261,6 +267,9 @@ public sealed class Strings
         GameTooltip = "Sau khi ghi, tạo frames.csv + session.json và kiểm tra hợp lệ",
         HotkeyTooltip = "Bấm vào đây rồi nhấn tổ hợp phím mới",
         PlayerId = "Mã người chơi",
+        PlayerIdTooltip = "Tên thư mục của bạn trong session giao khách: 1-32 chữ thường, số, - hoặc _ (vd. p1, thanh)",
+        PlayerName = "Tên",
+        PlayerNameTooltip = "Tên của bạn ghi trong player.json, để khách phân biệt người chơi",
         Room = "Room",
         RoomTooltip = "Mã mời của room này: gửi cho những người chơi khác",
         EnterInviteCode = "Mã mời do host của room gửi (6 ký tự):",
@@ -334,7 +343,7 @@ public sealed class Strings
         HostHint = hotkey => $"Host: khi mọi người đã sẵn sàng (✓), nhấn {hotkey} để bắt đầu round; nhấn lại để kết thúc.",
         RoundKept = (session, dir) => $"✓ Round {session}: đã ghi, lưu tại {dir}",
         RoundCaptureFailed = (session, dir) => $"✗ Round {session}: ghi lỗi (phần đã ghi vẫn ở {dir})",
-        InvalidRoomCode = "Hãy điền mã người chơi trước.",
+        PlayerIdentityRequired = "Hãy điền Mã người chơi (1-32 chữ thường, số, - hoặc _) và Tên trước.",
         JoiningRoom = "Đang vào room…",
         RoomStatus = (code, host, members) => $"Room {code}{(host ? " · bạn là host: gửi mã mời này cho mọi người" : "")}\nNgười chơi: {members}",
         StartRound = hotkey => $"Bắt đầu round ({hotkey})",

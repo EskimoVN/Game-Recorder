@@ -75,8 +75,11 @@
 
         <!-- Room rows: shown only when odx-capture.json names an orchestrator. -->
         <Label x:Name="PlayerLabel" Grid.Row="6" />
-        <TextBox x:Name="PlayerBox" AutomationProperties.AutomationId="PlayerBox" Grid.Row="6" Grid.Column="1" Width="200"
-                 HorizontalAlignment="Left" Margin="0,0,0,6" VerticalContentAlignment="Center" />
+        <StackPanel x:Name="PlayerPanel" Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,0,0,6">
+            <TextBox x:Name="PlayerBox" AutomationProperties.AutomationId="PlayerBox" Width="150" VerticalContentAlignment="Center" />
+            <Label x:Name="NameLabel" Margin="12,0,8,0" />
+            <TextBox x:Name="NameBox" AutomationProperties.AutomationId="NameBox" Width="150" VerticalContentAlignment="Center" />
+        </StackPanel>
 
         <Label x:Name="RoomLabel" Grid.Row="7" />
         <StackPanel x:Name="RoomPanel" Grid.Row="7" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,0,0,6">

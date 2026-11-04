@@ -94,8 +94,9 @@ public partial class MainWindow : Window
         ObsPasswordBox.Password = _settings.ObsPassword ?? "";
         HotkeyBox.Text = _settings.Hotkey.ToString();
         PlayerBox.Text = _settings.PlayerId;
+        NameBox.Text = _settings.PlayerName;
         var roomRows = _config.Orchestrator is null ? Visibility.Collapsed : Visibility.Visible;
-        PlayerLabel.Visibility = PlayerBox.Visibility = RoomLabel.Visibility = RoomPanel.Visibility = roomRows;
+        PlayerLabel.Visibility = PlayerPanel.Visibility = RoomLabel.Visibility = RoomPanel.Visibility = roomRows;
         Loaded += async (_, _) => await RefreshWindowsAsync();
         Loaded += async (_, _) => await CheckEncoderAsync();
         _clock.Tick += (_, _) => ShowRecordingStatus();
@@ -121,6 +122,9 @@ public partial class MainWindow : Window
         FpsLabel.Content = _t.Fps;
         HotkeyLabel.Content = _t.Hotkey;
         PlayerLabel.Content = _t.PlayerId;
+        PlayerBox.ToolTip = _t.PlayerIdTooltip;
+        NameLabel.Content = _t.PlayerName;
+        NameBox.ToolTip = _t.PlayerNameTooltip;
         RoomLabel.Content = _t.Room;
         AudioBox.Content = _t.AudioOption;
         AudioBox.ToolTip = _t.AudioTooltip;
@@ -266,6 +270,7 @@ public partial class MainWindow : Window
         _settings.ObsAddress = ObsAddressBox.Text.Trim();
         _settings.ObsPassword = ObsPasswordBox.Password.Length > 0 ? ObsPasswordBox.Password : null;
         _settings.PlayerId = PlayerBox.Text.Trim();
+        _settings.PlayerName = NameBox.Text.Trim();
         _settings.Save();
     }
 
@@ -356,7 +361,7 @@ public partial class MainWindow : Window
         ObsAddressBox.IsEnabled = ObsPasswordBox.IsEnabled = ObsTestButton.IsEnabled = idle;
         ObsConnectionLabel.Visibility = ObsConnectionPanel.Visibility = ObsTestButton.Visibility =
             obs ? Visibility.Visible : Visibility.Collapsed;
-        LanguageBox.IsEnabled = PlayerBox.IsEnabled = idle;
+        LanguageBox.IsEnabled = PlayerBox.IsEnabled = NameBox.IsEnabled = idle;
         bool inRoom = state == RunState.Agent && _agent?.Room is not null;
         RoomBox.Visibility = inRoom ? Visibility.Visible : Visibility.Collapsed;
         JoinButton.Content = inRoom ? _t.LeaveRoom : _t.JoinRoom;
@@ -517,12 +522,12 @@ public partial class MainWindow : Window
     private void EnterRoom(string? code, bool lan = false)
     {
         SaveSettings();
-        if (_config.Orchestrator is not { } orchestrator || _settings.PlayerId.Length == 0)
+        if (_config.Orchestrator is not { } orchestrator || !PlayerIdentity.IsValidId(_settings.PlayerId) || _settings.PlayerName.Length == 0)
         {
-            SetStatus(t => t.InvalidRoomCode);
+            SetStatus(t => t.PlayerIdentityRequired);
             return;
         }
-        var room = new RoomSession(new AgentOptions(orchestrator, _settings.PlayerId, Environment.UserName, PackageFolders.Captures,
+        var room = new RoomSession(new AgentOptions(orchestrator, _settings.PlayerId, _settings.PlayerName, PackageFolders.Captures,
             _settings.WindowProcess, RoomCode: code, CreateRoom: code is null, AccessKey: _config.AccessKey, Lan: lan),
             StartAgentCapture, _packets.GetAsync);
         var agent = room.Agent;

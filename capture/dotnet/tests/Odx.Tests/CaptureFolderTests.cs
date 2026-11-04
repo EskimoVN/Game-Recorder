@@ -107,3 +107,17 @@ public class CaptureFolderTests
         return path;
     }
 }
+
+public class PlayerIdentityTests
+{
+    [Theory]
+    [InlineData("p1", true)]
+    [InlineData("thanh_01", true)]
+    [InlineData("a-b", true)]
+    [InlineData("", false)]
+    [InlineData("P1", false)]
+    [InlineData("desktop bclrdmb", false)]
+    [InlineData("-p1", false)]
+    [InlineData("abcdefghijabcdefghijabcdefghijabc", false)]
+    public void A_player_id_is_a_safe_folder_name(string id, bool valid) => Assert.Equal(valid, PlayerIdentity.IsValidId(id));
+}

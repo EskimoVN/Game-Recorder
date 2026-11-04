@@ -41,6 +41,11 @@ public static class HeadlessAgent
                 default: usage = true; break;
             }
         }
+        if (player is not null && !PlayerIdentity.IsValidId(player))
+        {
+            Console.Error.WriteLine($"--player {player}: a player id is 1-32 lowercase letters, digits, '-' or '_'");
+            return 2;
+        }
         if (usage || room is null || player is null || orchestrator is null)
         {
             Console.Error.WriteLine("usage: odx-app --headless --room <invite code> --player <id> [--auto-ready] [--name <name>] " +
