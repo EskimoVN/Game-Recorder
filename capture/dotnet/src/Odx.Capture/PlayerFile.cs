@@ -23,6 +23,7 @@ public static class PlayerFile
         var json = (JsonObject)session.DeepClone();
         json.Remove("vendor_tool_version");
         json.Remove("vendor_clock_sync");
+        json.Remove("vendor_capture_id");
         json["vendor_name"] = vendorName;
         long durationMs = (long)Math.Round(session["duration_ms"]!.GetValue<double>());
         json["created_at_utc"] = UtcText.IsoSeconds(firstFrameUtcMs);

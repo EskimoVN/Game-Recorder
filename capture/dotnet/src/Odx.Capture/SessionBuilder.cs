@@ -37,8 +37,10 @@ public static class SessionBuilder
 
     /// <param name="config">The client's format names (vendor, frames_bin.bin header); null: odx-capture.json next to odx.</param>
     /// <param name="player">Named in player.json; null for a capture outside a room.</param>
+    /// <param name="sessionId">The round's session id (spec v3 §1: shared by every participant); null outside a room, where the
+    /// recorder's capture_id serves.</param>
     public static BuildReport Build(string captureDir, GameProfile profile, CaptureConfig? config = null, string? cameraDir = null,
-        PlayerIdentity? player = null)
+        PlayerIdentity? player = null, string? sessionId = null)
     {
         config ??= CaptureConfig.Load();
         var frames = VideoFrameLogReader.Read(CaptureFolder.Raw(captureDir, "video_frames.csv"));
@@ -62,7 +64,8 @@ public static class SessionBuilder
         double durationMs = frames.Count * 1000.0 / fps;
         var (clockMap, clock) = ClockFor(captureDir, recording);
         double startUnixMs = clockMap.ToUnixMs(times[0]);
-        string sessionId = Required<string>(recording, "capture_id");
+        string captureId = Required<string>(recording, "capture_id");
+        sessionId ??= captureId;
         var session = new JsonObject
         {
             ["vendor_name"] = config.VendorName.ToLowerInvariant(),
@@ -85,6 +88,8 @@ public static class SessionBuilder
             ["vendor_tool_version"] = BuildInfo.Version,
             // Not in the spec: how created_at_utc / ended_at_utc were obtained (spec v3 §4 asks for offset + RTT).
             ["vendor_clock_sync"] = ClockJson(clock),
+            // Not in the spec: the recorder's id of this recording, distinct from the round's session_id.
+            ["vendor_capture_id"] = captureId,
         };
         File.WriteAllText(Path.Combine(captureDir, "session.json"), session.ToJsonString(Json));
         WriteKeyBindings(captureDir, profile);

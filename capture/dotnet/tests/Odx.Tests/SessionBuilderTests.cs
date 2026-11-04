@@ -211,6 +211,33 @@ public class SessionBuilderTests
         return poses;
     }
 
+    /// <summary>Spec v3 §1: every participant shares the round's session_id; the recorder's capture_id stays as a vendor field.</summary>
+    [Fact]
+    public void A_rounds_capture_takes_the_rounds_session_id()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), $"odx-build-{Guid.NewGuid():N}");
+        try
+        {
+            WriteCapture(dir);
+
+            var report = SessionBuilder.Build(dir, GameProfile.Load(WriteProfile(dir)), sessionId: "m1-r01");
+
+            Assert.Equal("m1-r01", report.SessionId);
+            var session = JsonNode.Parse(File.ReadAllText(Path.Combine(dir, "session.json")))!;
+            Assert.Equal("m1-r01", (string?)session["session_id"]);
+            Assert.Equal("cap-0001", (string?)session["vendor_capture_id"]);
+            var player = JsonNode.Parse(File.ReadAllText(Path.Combine(dir, PlayerFile.FileName)))!.AsObject();
+            Assert.Equal("m1-r01", (string?)player["session_id"]);
+            Assert.False(player.ContainsKey("vendor_capture_id"));
+            using var bin = File.OpenRead(Path.Combine(dir, ClientFramesBin.FileName));
+            Assert.Equal("m1-r01", Odx.Capture.ClientMp.FileHeader.Parser.ParseDelimitedFrom(bin).SessionId);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
     /// <summary>A capture folder as odx input + odx record would leave it: 120 frames at 60 fps on an irregular-free grid.</summary>
     private static void WriteCapture(string dir)
     {
