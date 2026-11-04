@@ -13,6 +13,9 @@ It prints the orchestrator's address and access key. Put them in the repository'
 players' package for it (tag `capture-v<version>` or Run workflow) and attaches the zip to a release. With a domain of our
 own the package stays valid when the machine is replaced.
 
-`reforger-server` (Arma Reforger 1.6.0.68 command-line server, `-client <IP>:2001`) was set up by hand: server build
-uploaded from a PC because Steam refuses logins from AWS addresses, the mod in `/opt/reforger/addons/` with a lowercase
-`scripts/` folder (`document/games/arma-reforger.md`), systemd unit `reforger`.
+`bash create-reforger.sh [server build folder]` creates `reforger-server` (t3.xlarge, 60 GB, Elastic IP, SSH key
+`~/.ssh/reforger-server.pem`, UDP 2001 open): the Arma Reforger 1.6.0.68 command-line server, `-client <IP>:2001`. The
+build (data depot + Linux depot, manifests in `document/games/arma-reforger.md`) is downloaded on a PC with DepotDownloader,
+because Steam refuses logins from AWS addresses, and uploaded by the script; the first run needs it. Each run replaces the
+`OdxCapture` mod (`/opt/reforger/addons/`, lowercase `scripts/`) and `reforger/*.txt` (`$profile:odx/`) with HEAD's and
+restarts the systemd unit `reforger`.
