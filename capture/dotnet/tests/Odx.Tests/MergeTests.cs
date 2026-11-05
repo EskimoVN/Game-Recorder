@@ -53,7 +53,7 @@ public sealed class GameServerAgentTests
         var (dir, report) = MultiplayerSession.Assemble(kept, Path.Combine(root, "out"), Odx.Cli.MergeCommand.Vendor,
             games: Odx.Cli.MergeCommand.Games);
         Assert.Equal(["tv_record replays/g1-r01", "tv_stoprecord"], rcon.Commands);
-        Assert.Equal(lines[10..20], File.ReadAllLines(Path.Combine(dir, "server", "capture", Cs2ServerCapture.NetLogFile)));
+        Assert.Equal(lines[10..20], File.ReadAllLines(Path.Combine(root, "out", MultiplayerSession.WorkDir, "g1-r01", "server", Cs2ServerCapture.NetLogFile)));
         Assert.True(File.Exists(Path.Combine(dir, "server", PacketLog.BinFile)));
         var server = JsonNode.Parse(File.ReadAllText(Path.Combine(dir, "session.json")))!["server"]!;
         Assert.True(server["clock_sync"]!["sample_count"]!.GetValue<int>() >= 2);  // at least the round's start and end

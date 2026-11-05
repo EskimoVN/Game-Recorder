@@ -1,4 +1,4 @@
-// odx validate <session_dir> [<session_dir> ...] [--json] [--no-video]
+// odx validate <session_dir> [<session_dir> ...] [--json] [--no-video] [--decode]
 // A session dir holds session.json, frames.csv and video.mp4. Exit code 1 if any error is found; warnings do not fail.
 using System.Text.Encodings.Web;
 using System.Text.Json;
@@ -10,15 +10,15 @@ public static class ValidateCommand
 {
     public static int Run(string[] args)
     {
-        bool json = args.Contains("--json"), video = !args.Contains("--no-video");
+        bool json = args.Contains("--json"), video = !args.Contains("--no-video"), decode = args.Contains("--decode");
         var sessions = args.Where(a => !a.StartsWith("--", StringComparison.Ordinal)).ToList();
-        if (sessions.Count == 0 || args.Any(a => a.StartsWith("--", StringComparison.Ordinal) && a is not ("--json" or "--no-video")))
+        if (sessions.Count == 0 || args.Any(a => a.StartsWith("--", StringComparison.Ordinal) && a is not ("--json" or "--no-video" or "--decode")))
         {
-            Console.Error.WriteLine("usage: odx validate <session_dir> [<session_dir> ...] [--json] [--no-video]");
+            Console.Error.WriteLine("usage: odx validate <session_dir> [<session_dir> ...] [--json] [--no-video] [--decode]");
             return 2;
         }
 
-        var results = sessions.ToDictionary(s => s, s => SessionValidator.ValidateSession(s, video));
+        var results = sessions.ToDictionary(s => s, s => SessionValidator.ValidateSession(s, video, decode: decode));
         if (json)
         {
             var options = new JsonSerializerOptions

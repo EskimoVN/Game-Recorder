@@ -8,7 +8,9 @@ namespace Odx.Capture;
 /// <summary>Runs the vendor validation checks of Capture Spec v2 §1.5 (<see cref="Rules.All"/>) on one session folder.</summary>
 public static class SessionValidator
 {
-    public static List<Issue> ValidateSession(string sessionDir, bool video = true, ValidationTolerances? tolerances = null)
+    /// <param name="decode">Also decode video.mp4 to count its frames (v2 §1.5.6 by decoding; 10–20 s per 5 min of 1080p60).</param>
+    public static List<Issue> ValidateSession(string sessionDir, bool video = true, ValidationTolerances? tolerances = null,
+        bool decode = false)
     {
         JsonObject session;
         try
@@ -42,6 +44,19 @@ public static class SessionValidator
 
         if (video && VideoIssue(data, Path.Combine(sessionDir, "video.mp4")) is { } videoIssue) issues.Add(videoIssue);
         if (video) issues.AddRange(Run(data, Needs.Video));
+        if (video && decode && data.Video is not null)
+        {
+            try
+            {
+                long decoded = VideoTrim.DecodedFrameCount(ExternalTools.Ffmpeg(), Path.Combine(sessionDir, "video.mp4"));
+                if (decoded != data.Rows.Count)
+                    issues.Add(Issue.Error("video.decoded_frame_count", $"{decoded} frames decode vs {data.Rows.Count} frames.csv rows"));
+            }
+            catch (InvalidOperationException e)
+            {
+                issues.Add(Issue.Error("video.decoded_frame_count", e.Message));
+            }
+        }
         return issues;
     }
 

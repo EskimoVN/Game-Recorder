@@ -95,9 +95,17 @@ public static class ObsRecorder
                 try
                 {
                     info = Mp4Reader.Read(videoPath);
+                    // OBS's stop can leave a last sample that counts in the sample table but does not decode; spec v2 §1.5.6
+                    // counts frames, so the file is remuxed once more without it.
+                    long decoded = VideoTrim.DecodedFrameCount(options.Ffmpeg, videoPath);
+                    if (decoded < info.Frames && Remux(options.Ffmpeg, videoPath, videoPath + ".fix.mp4", frames: decoded) is null)
+                    {
+                        File.Move(videoPath + ".fix.mp4", videoPath, true);
+                        info = Mp4Reader.Read(videoPath);
+                    }
                     File.Delete(obsFile!);
                 }
-                catch (InvalidDataException e)
+                catch (Exception e) when (e is InvalidDataException or InvalidOperationException)
                 {
                     error = $"cannot read the remuxed OBS recording: {e.Message}";
                 }
@@ -153,12 +161,14 @@ public static class ObsRecorder
     }
 
     /// <summary>OBS's file (MKV, MP4 or fragmented MP4) into a plain MP4, streams copied.</summary>
-    private static string? Remux(string ffmpeg, string from, string to)
+    /// <param name="frames">Keep only this many video samples (the decodable ones); null keeps all.</param>
+    private static string? Remux(string ffmpeg, string from, string to, long? frames = null)
     {
         var psi = new ProcessStartInfo(ffmpeg) { UseShellExecute = false, RedirectStandardError = true };
-        foreach (string a in new[] { "-y", "-loglevel", "error", "-i", from, "-map", "0:v:0", "-map", "0:a?", "-c", "copy",
-                     "-movflags", "+faststart", to })
-            psi.ArgumentList.Add(a);
+        var args = new List<string> { "-y", "-loglevel", "error", "-i", from, "-map", "0:v:0", "-map", "0:a?", "-c", "copy" };
+        if (frames is long n) args.AddRange(["-frames:v", n.ToString(System.Globalization.CultureInfo.InvariantCulture)]);
+        args.AddRange(["-movflags", "+faststart", to]);
+        foreach (string a in args) psi.ArgumentList.Add(a);
         using var proc = Process.Start(psi)!;
         string stderr = proc.StandardError.ReadToEnd();
         proc.WaitForExit();

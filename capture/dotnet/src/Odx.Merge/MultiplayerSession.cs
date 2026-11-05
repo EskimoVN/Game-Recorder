@@ -47,9 +47,12 @@ public sealed record SessionReport(string SessionId, bool Pass, int ValidPlayers
 /// capture, server/ with the game server's own capture when there is one) into the spec v3 tree and checks it:
 /// <code>
 /// &lt;vendor&gt;/&lt;mm-dd-yyyy&gt;/&lt;game&gt;/&lt;session-id&gt;/
-///   session.json  validation.json  schema.bin.gz  server/events.jsonl  [server/server_state.bin packets.bin packets.txt capture/]
-///   players/&lt;id&gt;/ player.json frames.csv frames.bin video.mp4 events.jsonl capture/(v2 session.json, raw logs)
+///   session.json  validation.json  schema.bin.gz  server/events.jsonl  [server/server_state.bin packets.bin packets.txt]
+///   players/&lt;id&gt;/ player.json frames.csv frames.bin video.mp4 events.jsonl key_bindings.json [packets.bin packets.txt]
+/// _work/&lt;session-id&gt;/ players/&lt;id&gt;/ (v2 session.json, raw logs, packets.pcapng) server/ (the game server's own recording)
 /// </code>
+/// Only the vendor tree is delivered (spec v3 §1, key_bindings.json per SOW §2); <see cref="DeliveryFiles"/> checks that
+/// nothing else is in it. Each player's stream is cut to start at round_start (players record from the countdown).
 /// Every frame gets a server UTC from the player's samples against the orchestrator's time service, so player
 /// events.jsonl carry the time and frame at which each server event happened in that player's video.
 /// </summary>
@@ -60,6 +63,9 @@ public static class MultiplayerSession
 
     /// <summary>Version of the client's multiplayer spec this tree follows (document header of spec v3).</summary>
     public const string SpecVersion = "3.1";
+
+    /// <summary>Next to the vendor tree under the output root: each session's working files, kept but not delivered.</summary>
+    public const string WorkDir = "_work";
 
     /// <param name="games">What odx merge knows of each game: the round's game title picks its server reader, the profile's
     /// network.protocol its packet decoder.</param>
@@ -74,7 +80,9 @@ public static class MultiplayerSession
         var profile = File.Exists(profilePath) ? JsonNode.Parse(File.ReadAllText(profilePath))?.AsObject() : null;
         string dir = Path.Combine(outRoot, vendor, DateTime.UtcNow.ToString("MM-dd-yyyy", CultureInfo.InvariantCulture),
             Slug(round.Game), round.SessionId);
+        string work = Path.Combine(outRoot, WorkDir, round.SessionId);
         Directory.CreateDirectory(Path.Combine(dir, "server"));
+        if (Directory.Exists(work)) Directory.Delete(work, true);
         string stagedServer = Path.Combine(stagingDir, "server");
         JsonObject? serverInfo = null;
         string? serverError = null;
@@ -87,6 +95,7 @@ public static class MultiplayerSession
             try
             {
                 var server = game.WriteServer(stagedServer, Path.Combine(dir, "server"), round);
+                MoveToWork(Path.Combine(dir, "server", "capture"), Path.Combine(work, "server"));
                 events = events.Concat(server.Events).OrderBy(GameEvents.UtcMs).ToList();
                 serverInfo = server.Info;
                 cameras = server.Cameras;
@@ -101,7 +110,7 @@ public static class MultiplayerSession
         PlayerTimeline.WriteEvents(Path.Combine(dir, "server", "events.jsonl"), events);
         FramesBin.WriteSchema(Path.Combine(dir, FramesBin.SchemaFileName));
 
-        var reports = round.Players.Select(p => AssemblePlayer(round, p, events, profile, cameras, games, stagingDir, dir, tol)).ToList();
+        var reports = round.Players.Select(p => AssemblePlayer(round, p, events, profile, cameras, games, stagingDir, dir, work, tol)).ToList();
         int valid = reports.Count(r => r.Pass);
         int required = tol.MinValidPlayers ?? (round.Players.Count <= 3 ? round.Players.Count : round.Players.Count - 1);
         var issues = new List<Issue>();
@@ -116,6 +125,8 @@ public static class MultiplayerSession
             issues.Add(Issue.Error("session.server_clock",
                 $"the orchestrator's clock is {serverClock.OffsetMs:+0;-0} ms off NTP {serverClock.Server} (limit {tol.MaxSystemClockOffsetMs} ms)"));
         if (serverError is not null) issues.Add(Issue.Warning("server.capture", $"the game server's capture could not be read: {serverError}"));
+        if (DeliveryFiles.Unexpected(dir) is { Count: > 0 } extra)
+            issues.Add(Issue.Error("delivery.files", $"not in spec v3 §1's tree: {string.Join(", ", extra)}"));
         foreach (string problem in serverProblems) issues.Add(Issue.Warning("server.capture", problem));
         var report = new SessionReport(round.SessionId, issues.All(i => i.Severity != Issue.ErrorSeverity), valid, required, issues, reports);
 
@@ -132,7 +143,8 @@ public static class MultiplayerSession
             {
                 ["start_trigger"] = round.CountdownMs > 0 ? "host (odx-app), after a countdown" : "game server",
                 ["stop_trigger"] = round.EndReason?.StartsWith("player_stop:", StringComparison.Ordinal) == true ? "host (odx-app)" : "game server",
-                ["recording"] = "from the countdown until the round ends; a permanent death stops that player",
+                ["recording"] = "from the countdown until the round ends, delivered from the first frame at or after round_start " +
+                                "(player.json pre_roll_frames: how many were cut); a permanent death stops that player",
                 ["respawn_allowed"] = profile?["rules"]?["respawn_allowed"]?.DeepClone(),
             },
             ["map"] = round.Map ?? serverInfo?["map"]?.DeepClone(),
@@ -179,12 +191,11 @@ public static class MultiplayerSession
                                  "odx.capture.v1.FileHeader, whose record_type names the type of every following message",
                 ["frames.bin"] = "odx.capture.v1.FrameRecord: one per frames.csv row, full precision, plus server_time_us",
                 ["packets.bin"] = "odx.capture.v1.PacketRecord: one per decoded game message (or per UDP/TCP payload when the " +
-                                  "game's protocol is kept raw), with server_time_us; packets.txt lists the same records as text, " +
-                                  "and capture/packets.pcapng holds the original capture; server/packets.bin holds the net messages " +
-                                  "the game server exchanged with each client (peer_id: the client's SteamID64)",
+                                  "game's protocol is kept raw), with server_time_us; packets.txt lists the same records as text; " +
+                                  "server/packets.bin holds the net messages the game server exchanged with each client " +
+                                  "(peer_id: the client's SteamID64)",
                 ["server_state.bin"] = "odx.capture.v1.ServerStateRecord: one per server tick, every player's state (matched to " +
-                                       "players/<id>/player.json by steam_id) and the world entities that matter to play; " +
-                                       "server/capture/ holds the original recording (CS2: SourceTV demo.dem)",
+                                       "players/<id>/player.json by steam_id) and the world entities that matter to play",
             },
             ["vendor_tool_version"] = BuildInfo.Version,
         };
@@ -195,11 +206,13 @@ public static class MultiplayerSession
 
     private static PlayerReport AssemblePlayer(RoundRecord round, RoundPlayer player, List<JsonObject> events, JsonObject? profile,
         IReadOnlyDictionary<string, IServerCameraTrack> cameras, GameModules games, string stagingDir, string sessionDir,
-        GateTolerances tol)
+        string workDir, GateTolerances tol)
     {
         string src = Path.Combine(stagingDir, "players", player.PlayerId);
+        string work = Path.Combine(workDir, "players", player.PlayerId);
         string dst = Path.Combine(sessionDir, "players", player.PlayerId);
-        Directory.CreateDirectory(Path.Combine(dst, "capture"));
+        Directory.CreateDirectory(dst);
+        Directory.CreateDirectory(work);
         var checks = new List<QaCheck>();
         var info = new JsonObject
         {
@@ -219,7 +232,7 @@ public static class MultiplayerSession
         if (!present) return Finish(dst, info, player.PlayerId, checks);
 
         foreach (string f in CaptureFiles.Where(f => File.Exists(CaptureFolder.Find(src, f))))
-            File.Copy(CaptureFolder.Find(src, f), Path.Combine(dst, "capture", f), true);
+            File.Copy(CaptureFolder.Find(src, f), Path.Combine(work, f), true);
         File.Copy(Path.Combine(src, "frames.csv"), Path.Combine(dst, "frames.csv"), true);
         foreach (string f in new[] { "video.mp4", SessionBuilder.KeyBindingsFile }.Where(f => File.Exists(Path.Combine(src, f))))
             File.Copy(Path.Combine(src, f), Path.Combine(dst, f), true);
@@ -236,6 +249,9 @@ public static class MultiplayerSession
         AddFloorChecks(checks, capture, recording, rows, info, tol, player.StopReason == "permanent_death");
 
         var frameUtc = PutFramesOnServerTime(round, src, info, checks, tol);
+        double? firstCapturedUtc = frameUtc?[0];
+        if (frameUtc is not null && TrimToRoundStart(round, dst, capture, rows, frameUtc, info, checks) == 0)
+            AddDecodedCheck(checks, Path.Combine(dst, "video.mp4"), rows.Count);
         info["network"] = new JsonObject
         {
             ["ping_ms"] = info["ping_ms"]?.DeepClone(),
@@ -257,7 +273,7 @@ public static class MultiplayerSession
         info["round_start_frame"] = roundStartFrame < 0 ? null : roundStartFrame;
         info["round_start_video_time_ms"] = Math.Round(round.StartUtcMs - frameUtc[0], 1);
 
-        double lateStart = frameUtc[0] - round.StartUtcMs;
+        double lateStart = firstCapturedUtc!.Value - round.StartUtcMs;
         checks.Add(new QaCheck("sync.start", $"first frame at most {tol.StartGraceMs} ms after round_start",
             lateStart <= tol.StartGraceMs, $"first frame {lateStart:F0} ms after round_start"));
         if ((player.StopUtcMs ?? round.EndUtcMs) is double stopAt)
@@ -285,11 +301,7 @@ public static class MultiplayerSession
         double leadMs = (info["ping_ms"]?.GetValue<double>() ?? 0) / 2;
         int width = capture["record_width_px"]?.GetValue<int>() ?? 0, height = capture["record_height_px"]?.GetValue<int>() ?? 0;
         var (withCamera, notFirstPerson) = track.Fill(rows, frameUtc, leadMs, width, height);
-        using (var writer = new StreamWriter(framesCsv, false, new System.Text.UTF8Encoding(false)) { NewLine = "\n" })
-        {
-            writer.Write(Csv.Line(Frames.Columns));
-            foreach (var row in rows) writer.Write(Csv.Line(Frames.Columns.Select(c => row[c])));
-        }
+        WriteFrames(framesCsv, rows);
 
         info["camera"] = track.Describe(leadMs);
         info["frame_cleanliness"] = new JsonObject
@@ -360,6 +372,7 @@ public static class MultiplayerSession
     }
 
     /// <summary>packets.bin / packets.txt from the player's packets.pcapng (spec v3 §2.3), when the game's profile asks for them.</summary>
+    /// <summary>Spec v3 §2.3: a game whose profile has a network section must have its packets, so a missing or empty capture fails the player.</summary>
     private static void AddPackets(RoundRecord round, RoundPlayer player, JsonObject? profile, GameModules games, string src, string dst,
         JsonObject info, List<QaCheck> checks)
     {
@@ -367,13 +380,11 @@ public static class MultiplayerSession
         string pcapng = CaptureFolder.Raw(src, PacketCaptureFiles.Pcapng);
         if (!File.Exists(pcapng))
         {
-            checks.Add(new QaCheck("packets.captured", "the game's network traffic was captured", false,
-                "no packets.pcapng (packet capture declined or failed on this machine)", Required: false));
+            checks.Add(new QaCheck("packets.captured", "the game's network traffic was captured (spec v3 §2.3)", false,
+                "no packets.pcapng (packet capture declined or failed on this machine)"));
             return;
         }
-        File.Copy(pcapng, Path.Combine(dst, "capture", PacketCaptureFiles.Pcapng), true);
         string localPath = CaptureFolder.Raw(src, PacketCaptureFiles.LocalAddresses);
-        if (File.Exists(localPath)) File.Copy(localPath, Path.Combine(dst, "capture", PacketCaptureFiles.LocalAddresses), true);
         var spec = PacketCaptureSpec.Parse(network, "game profile");
         string protocol = spec.Protocol;
         double offsetMs = info["clock_sync"]?["offset_ms"]?.GetValue<double>() ?? 0;
@@ -384,13 +395,109 @@ public static class MultiplayerSession
                     ToolVersion = player.ToolVersion ?? "" },
                 Path.Combine(dst, PacketLog.BinFile), Path.Combine(dst, PacketLog.TextFile), games.Packets);
             info["packets"] = new JsonObject { ["protocol"] = protocol, ["records"] = count, ["clock_offset_ms"] = offsetMs };
-            checks.Add(new QaCheck("packets.captured", "the game's network traffic was captured", true, $"{count} records ({protocol})",
-                Required: false));
+            checks.Add(new QaCheck("packets.captured", "the game's network traffic was captured (spec v3 §2.3)", count > 0,
+                count > 0 ? $"{count} records ({protocol})" : $"packets.pcapng holds no {protocol} traffic (wrong adapter or port?)"));
         }
         catch (InvalidDataException e)
         {
-            checks.Add(new QaCheck("packets.captured", "the game's network traffic was captured", false, e.Message, Required: false));
+            checks.Add(new QaCheck("packets.captured", "the game's network traffic was captured (spec v3 §2.3)", false, e.Message));
         }
+    }
+
+    /// <summary>
+    /// Players record from the countdown, a few seconds before play, and spec v3 §1 makes the round the task boundary: the
+    /// delivered stream starts at the first frame at or after round_start. The video is re-encoded for a frame-accurate cut
+    /// (odx record's keyframes are 2–4 s apart), frames.csv is rebased (frame 0, timestamp 0), and frames.bin and
+    /// events.jsonl follow from the rebased rows. Returns the frames cut; 0 when nothing precedes round_start, when the
+    /// frame indexes cannot be trusted (video.frame_count already fails) or when the cut failed (video.trimmed fails).
+    /// </summary>
+    private static int TrimToRoundStart(RoundRecord round, string dst, JsonObject capture, List<Dictionary<string, string>> rows,
+        List<double> frameUtc, JsonObject info, List<QaCheck> checks)
+    {
+        int n = frameUtc.FindIndex(t => t >= round.StartUtcMs);
+        string video = Path.Combine(dst, "video.mp4");
+        double fps = capture["fps"]?.GetValue<double>() ?? 0;
+        if (n <= 0 || fps <= 0 || !File.Exists(video)) return 0;
+        Mp4Info mp4;
+        try
+        {
+            mp4 = Mp4Reader.Read(video);
+        }
+        catch (InvalidDataException)
+        {
+            return 0;
+        }
+        if (mp4.Frames != rows.Count) return 0;
+        string ffmpeg = ExternalTools.Ffmpeg(), trimmed = video + ".trim.mp4";
+        string? error = null;
+        try
+        {
+            VideoTrim.Trim(ffmpeg, video, trimmed, n, fps, mp4.HasAudio);
+            long decoded = VideoTrim.DecodedFrameCount(ffmpeg, trimmed), samples = Mp4Reader.Read(trimmed).Frames;
+            if (decoded != rows.Count - n || samples != rows.Count - n)
+                error = $"the trimmed video has {samples} samples and {decoded} decoded frames, expected {rows.Count - n}";
+        }
+        catch (Exception e) when (e is IOException or InvalidDataException or InvalidOperationException)
+        {
+            error = e.Message;
+        }
+        if (error is not null)
+        {
+            File.Delete(trimmed);
+            checks.Add(new QaCheck("video.trimmed", "the delivered stream starts at round_start (pre-roll cut)", false, error));
+            return 0;
+        }
+        File.Move(trimmed, video, true);
+        long baseMs = long.Parse(rows[n]["timestamp_ms"], CultureInfo.InvariantCulture);
+        rows.RemoveRange(0, n);
+        frameUtc.RemoveRange(0, n);
+        for (int i = 0; i < rows.Count; i++)
+        {
+            rows[i]["frame_id"] = i.ToString(CultureInfo.InvariantCulture);
+            rows[i]["timestamp_ms"] = (long.Parse(rows[i]["timestamp_ms"], CultureInfo.InvariantCulture) - baseMs).ToString(CultureInfo.InvariantCulture);
+        }
+        WriteFrames(Path.Combine(dst, "frames.csv"), rows);
+        info["pre_roll_frames"] = n;
+        info["pre_roll_ms"] = baseMs;
+        if (info["recording"] is JsonObject recording)
+        {
+            recording["frame_count"] = rows.Count;
+            recording["duration_ms"] = rows.Count * 1000.0 / fps;
+        }
+        checks.Add(new QaCheck("video.trimmed", "the delivered stream starts at round_start (pre-roll cut)", true,
+            $"{n} frames ({baseMs} ms) before round_start cut, {rows.Count} kept; re-encoded, every frame decodes"));
+        return n;
+    }
+
+    /// <summary>Spec v2 §1.5.6 by decoding, not by the sample table: a recorder's cut-short last sample counts there but not here.</summary>
+    private static void AddDecodedCheck(List<QaCheck> checks, string video, int rows)
+    {
+        if (!File.Exists(video)) return;
+        try
+        {
+            long decoded = VideoTrim.DecodedFrameCount(ExternalTools.Ffmpeg(), video);
+            checks.Add(new QaCheck("video.decoded_frame_count", "every frame of video.mp4 decodes, one per frames.csv row",
+                decoded == rows, $"{decoded} frames decode, {rows} rows"));
+        }
+        catch (InvalidOperationException e)
+        {
+            checks.Add(new QaCheck("video.decoded_frame_count", "every frame of video.mp4 decodes, one per frames.csv row", false, e.Message));
+        }
+    }
+
+    private static void WriteFrames(string path, List<Dictionary<string, string>> rows)
+    {
+        using var writer = new StreamWriter(path, false, new System.Text.UTF8Encoding(false)) { NewLine = "\n" };
+        writer.Write(Csv.Line(Frames.Columns));
+        foreach (var row in rows) writer.Write(Csv.Line(Frames.Columns.Select(c => row[c])));
+    }
+
+    /// <summary>The game server's own recording goes next to the delivery, not into it.</summary>
+    private static void MoveToWork(string from, string to)
+    {
+        if (!Directory.Exists(from)) return;
+        Directory.CreateDirectory(Path.GetDirectoryName(to)!);
+        Directory.Move(from, to);
     }
 
     private static void AddRecordingInfo(JsonObject info, JsonObject capture, JsonObject? recording, JsonObject? profile)

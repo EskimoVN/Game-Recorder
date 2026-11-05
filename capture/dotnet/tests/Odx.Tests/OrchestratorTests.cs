@@ -120,8 +120,15 @@ public sealed class OrchestratorTests : IAsyncLifetime
             foreach (var p in RoundRecord.Load(staging).Players)
                 if (Directory.Exists(Path.Combine(_root, "agent-" + p.PlayerId, files.SessionId)))
                     CopyDir(Path.Combine(_root, "agent-" + p.PlayerId, files.SessionId), Path.Combine(staging, "players", p.PlayerId));
-            tcs.TrySetResult(MultiplayerSession.Assemble(MergeCommand.Sessions(staging).Single(), Path.Combine(_root, "out"),
-                MergeCommand.Vendor, FixtureTolerances));
+            try
+            {
+                tcs.TrySetResult(MultiplayerSession.Assemble(MergeCommand.Sessions(staging).Single(), Path.Combine(_root, "out"),
+                    MergeCommand.Vendor, FixtureTolerances));
+            }
+            catch (Exception e)
+            {
+                tcs.TrySetException(e);
+            }
         });
         return tcs.Task.WaitAsync(TimeSpan.FromSeconds(30));
     }
@@ -205,19 +212,28 @@ public sealed class OrchestratorTests : IAsyncLifetime
         Assert.Equal("permanent_death", (string?)JsonNode.Parse(File.ReadAllText(Path.Combine(dir, "players", "p2", "player.json")))!["stop_reason"]);
         var p1 = JsonNode.Parse(File.ReadAllText(Path.Combine(dir, "players", "p1", "player.json")))!;
         Assert.Equal("round_end", (string?)p1["stop_reason"]);
-        // The fake's 2 s of frames start when it is created, right after the round_start with a 1 s countdown.
-        Assert.InRange((int)p1["round_start_frame"]!, 40, 61);
-        Assert.InRange((double)p1["round_start_video_time_ms"]!, 600, 1000);
+        // The fake's 2 s of frames start when it is created, right after the round_start with a 1 s countdown: that
+        // pre-roll is cut from the delivered stream, so play starts at frame 0 (spec v3 §1).
+        Assert.InRange((int)p1["pre_roll_frames"]!, 30, 61);
+        Assert.InRange((double)p1["pre_roll_ms"]!, 600, 1000);
+        Assert.Equal(0, (int)p1["round_start_frame"]!);
+        Assert.InRange((double)p1["round_start_video_time_ms"]!, -20, 0);
+        Assert.Equal(SessionFixtures.NFrames - (int)p1["pre_roll_frames"]!, (int)p1["recording"]!["frame_count"]!);
+        Assert.Contains(p1["qa"]!["checks"]!.AsArray(), c => (string?)c!["id"] == "video.trimmed" && (bool)c["pass"]!);
         Assert.Equal(2, (int)p1["clock_sync"]!["sample_count"]!);
         Assert.Equal("server_clock - player_clock", (string?)p1["clock_sync"]!["offset_definition"]);
         foreach (string p in new[] { "p1", "p2" })
         {
             Assert.True(File.Exists(Path.Combine(dir, "players", p, "video.mp4")));
-            Assert.True(File.Exists(Path.Combine(dir, "players", p, "capture", "session.json")));
+            Assert.False(Directory.Exists(Path.Combine(dir, "players", p, "capture")));  // working files stay out of the delivery
+            Assert.True(File.Exists(Path.Combine(_root, "out", MultiplayerSession.WorkDir, report.SessionId, "players", p, "session.json")));
+            Assert.Empty(DeliveryFiles.Unexpected(dir));
+            Assert.Equal(Mp4Reader.Read(Path.Combine(dir, "players", p, "video.mp4")).Frames, File.ReadLines(Path.Combine(dir, "players", p, "frames.csv")).Count() - 1);
             Assert.True(File.Exists(Path.Combine(dir, "players", p, SessionBuilder.KeyBindingsFile)));
             var events = MultiplayerSession.ReadEvents(Path.Combine(dir, "players", p, "events.jsonl"));
             var kill = events.Single(e => GameEvents.Type(e) == "kill");
-            Assert.InRange(kill["frame_index"]!.GetValue<int>(), 0, SessionFixtures.NFrames - 1);
+            Assert.Null(kill["frame_index"]);  // posted during the countdown: before the delivered stream, which starts at round_start
+            Assert.True((double)kill["video_time_ms"]! < 0);
             Assert.Equal("m1-r01", (string?)kill["session_id"]);
             Assert.NotNull(kill["event_id"]);
             var countdown = events.Single(e => GameEvents.Type(e) == "round_countdown");
@@ -225,12 +241,18 @@ public sealed class OrchestratorTests : IAsyncLifetime
             Assert.True((double)countdown["video_time_ms"]! < 0);
             var player = JsonNode.Parse(File.ReadAllText(Path.Combine(dir, "players", p, "player.json")))!;
             var roundStart = events.Single(e => GameEvents.Type(e) == "round_start");
-            Assert.Equal((int)player["round_start_frame"]!, (int)roundStart["frame_index"]! + 1);
+            // Frame 0 is the first frame at or after round_start, so the event itself falls within one frame before it.
+            Assert.Equal(0, (int)player["round_start_frame"]!);
+            Assert.Null(roundStart["frame_index"]);
+            Assert.InRange((double)roundStart["video_time_ms"]!, -1000.0 / SessionFixtures.Fps, 0);
 
             var (header, frames) = FramesBin.Read(Path.Combine(dir, "players", p, FramesBin.FileName));
             Assert.Equal("odx.capture.v1.FrameRecord", header.RecordType);
-            Assert.Equal(SessionFixtures.NFrames, frames.Count);
+            Assert.Equal(SessionFixtures.NFrames - (int)player["pre_roll_frames"]!, frames.Count);  // the pre-roll is cut
             var (_, rows) = Csv.ReadFile(Path.Combine(dir, "players", p, "frames.csv"));
+            Assert.Equal(frames.Count, rows.Count);
+            Assert.Equal("0", rows[0]["frame_id"]);
+            Assert.Equal("0", rows[0]["timestamp_ms"]);
             Assert.Equal(Frames.ParseDouble(rows[40]["C2W_M03"]), frames[40].C2W[3]);
             Assert.True(frames[1].ServerTimeUs > frames[0].ServerTimeUs);
 
