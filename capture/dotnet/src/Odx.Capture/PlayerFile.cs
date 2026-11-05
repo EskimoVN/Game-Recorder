@@ -28,6 +28,7 @@ public static class PlayerFile
         json.Remove("vendor_tool_version");
         json.Remove("vendor_clock_sync");
         json.Remove("vendor_capture_id");
+        json.Remove("vendor_audio");
         json["vendor_name"] = vendorName;
         long durationMs = (long)Math.Round(session["duration_ms"]!.GetValue<double>());
         json["created_at_utc"] = UtcText.IsoSeconds(firstFrameUtcMs);
@@ -52,7 +53,11 @@ public static class PlayerFile
         }
         string checkPath = CaptureFolder.Raw(captureDir, ClockCheck.FileName);
         if (File.Exists(checkPath)) (json["clock_sync"] ??= new JsonObject())["system_clock"] = SystemClock(ClockCheck.Load(checkPath));
-        json["recording"] = new JsonObject { ["video_first_frame_utc"] = UtcText.IsoUs(firstFrameUtcMs) };
+        json["recording"] = new JsonObject
+        {
+            ["video_first_frame_utc"] = UtcText.IsoUs(firstFrameUtcMs),
+            ["audio"] = session["vendor_audio"]?.DeepClone(),
+        };
         File.WriteAllText(Path.Combine(captureDir, FileName), json.ToJsonString(SessionBuilder.Json));
     }
 

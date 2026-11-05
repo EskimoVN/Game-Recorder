@@ -231,6 +231,7 @@ public static class MultiplayerSession
         string recordingPath = CaptureFolder.Raw(src, "recording.json");
         var recording = File.Exists(recordingPath) ? JsonNode.Parse(File.ReadAllText(recordingPath))!.AsObject() : null;
         AddRecordingInfo(info, capture, recording, profile);
+        if (recording?["audio"]?["status"] is JsonObject audio) AddAudioCheck(checks, Path.Combine(src, "video.mp4"), audio);
         var (_, rows) = Csv.ReadFile(Path.Combine(src, "frames.csv"));
         AddFloorChecks(checks, capture, recording, rows, info, tol, player.StopReason == "permanent_death");
 
@@ -408,9 +409,29 @@ public static class MultiplayerSession
             ["duplicate_frames"] = recording?["duplicate_frames"]?.DeepClone(),
             ["dropped_source_frames"] = recording?["dropped_source_frames"]?.DeepClone(),
             ["first_frame_capture_latency_ms"] = recording?["first_frame_capture_latency_ms"]?.DeepClone(),
+            ["audio"] = recording?["audio"]?["status"]?.DeepClone(),
         };
         info["input_mouse_convention"] = capture["input_mouse_convention"]?.DeepClone();
         info["key_bindings"] = profile?["bindings"]?.DeepClone();
+    }
+
+    /// <summary>Advisory: audio was asked for, so the video should carry the game's sound, not silence or nothing.</summary>
+    private static void AddAudioCheck(List<QaCheck> checks, string videoPath, JsonObject audio)
+    {
+        string source = audio["source"]?.GetValue<string>() ?? AudioStatus.NotRecorded;
+        double? silent = audio["silent_ratio"]?.GetValue<double>();
+        bool track = false;
+        try
+        {
+            track = File.Exists(videoPath) && Mp4Reader.Read(videoPath).HasAudio;
+        }
+        catch (InvalidDataException)
+        {
+        }
+        checks.Add(new QaCheck("audio.track", "the video carries the game's sound (odx record --audio)",
+            source != AudioStatus.NotRecorded && track && silent is not > 0.99,
+            $"source {source}{(audio["fallback_reason"] is { } f ? $" (fallback: {f})" : "")}, track {(track ? "present" : "missing")}" +
+            $"{(silent is double s ? $", {s:P0} silent" : "")}{(audio["error"] is { } e ? $", error: {e}" : "")}", Required: false));
     }
 
     /// <summary>Spec v3 §2 floors (720p/30) and the sample delivery's 10 s / camera-coverage checks; window-only capture is advisory.</summary>

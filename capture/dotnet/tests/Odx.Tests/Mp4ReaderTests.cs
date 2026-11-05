@@ -36,6 +36,27 @@ public class Mp4ReaderTests
     }
 
     [SkippableFact]
+    public void Sees_whether_there_is_a_sound_track()
+    {
+        Skip.IfNot(SessionFixtures.HasFfmpeg, "ffmpeg not on PATH");
+        string dir = Path.Combine(Path.GetTempPath(), $"odx-mp4-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        try
+        {
+            SessionFixtures.MakeVideo(Path.Combine(dir, "silent.mp4"), nFrames: 30);
+            SessionFixtures.MakeVideo(Path.Combine(dir, "sound.mp4"), nFrames: 30, audio: true);
+            Assert.False(Mp4Reader.Read(Path.Combine(dir, "silent.mp4")).HasAudio);
+            var sound = Mp4Reader.Read(Path.Combine(dir, "sound.mp4"));
+            Assert.True(sound.HasAudio);
+            Assert.Equal(30, sound.Frames);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [SkippableFact]
     public void Agrees_with_ffprobe_on_real_recordings()
     {
         string? dir = Environment.GetEnvironmentVariable("ODX_MP4_DIR");

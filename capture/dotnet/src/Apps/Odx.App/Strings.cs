@@ -132,6 +132,8 @@ public sealed class Strings
     public required string ClockSystem { get; init; }
     public required Func<string, string> ConfigInvalid { get; init; }
     public required Func<double, string> ClockWarning { get; init; }
+    /// <summary>One line on the audio track of a recording (odx record --audio).</summary>
+    public required Func<AudioStatus, string> AudioLine { get; init; }
     /// <summary>The room status line for the pre-round clock check (null: still measuring).</summary>
     public required Func<ClockCheck?, string> ClockLine { get; init; }
     public required string ClockSyncing { get; init; }
@@ -258,6 +260,13 @@ public sealed class Strings
         ClockSystem = "Clock: Windows clock only (NTP not measured — check time_server in odx-capture.json)",
         ConfigInvalid = error => $"Settings file not valid, the Windows clock is used: {error}",
         ClockWarning = offset => $"Warning: the Windows clock is {Math.Abs(offset) / 1000:F1} s off; fix Windows time sync.",
+        AudioLine = a => (a.Source switch
+            {
+                AudioStatus.FromProcess => "Audio: the game's own sound",
+                AudioStatus.FromDevice => $"Audio: everything this PC plays ({a.Device})" +
+                                      (a.FallbackReason is null ? "" : $" — the game's own sound was not available: {a.FallbackReason}"),
+                _ => $"Audio: NOT recorded ({a.Error})",
+            }) + (a.SilentRatio > 0.99 ? " — WARNING: the track is silent" : "") + (a.Discontinuities > 0 ? $" — {a.Discontinuities} gap(s)" : ""),
         ClockLine = c => (c is null ? "Clock: measuring against NTP…"
                 : c.NtpOffsetMs is double o
                     ? $"Clock: Windows clock {o:+0;-0} ms from NTP {c.NtpServer}" +
@@ -389,6 +398,13 @@ public sealed class Strings
         ClockSystem = "Đồng hồ: chỉ dùng đồng hồ Windows (chưa đo được NTP — kiểm tra time_server trong odx-capture.json)",
         ConfigInvalid = error => $"File cấu hình không hợp lệ, dùng đồng hồ Windows: {error}",
         ClockWarning = offset => $"Cảnh báo: đồng hồ Windows lệch {Math.Abs(offset) / 1000:F1} giây; hãy sửa đồng bộ giờ của Windows.",
+        AudioLine = a => (a.Source switch
+            {
+                AudioStatus.FromProcess => "Âm thanh: tiếng riêng của game",
+                AudioStatus.FromDevice => $"Âm thanh: mọi thứ máy đang phát ({a.Device})" +
+                                      (a.FallbackReason is null ? "" : $" — không lấy được tiếng riêng của game: {a.FallbackReason}"),
+                _ => $"Âm thanh: KHÔNG ghi được ({a.Error})",
+            }) + (a.SilentRatio > 0.99 ? " — CẢNH BÁO: track toàn im lặng" : "") + (a.Discontinuities > 0 ? $" — {a.Discontinuities} chỗ đứt" : ""),
         ClockLine = c => (c is null ? "Đồng hồ: đang đo so với NTP…"
                 : c.NtpOffsetMs is double o
                     ? $"Đồng hồ: đồng hồ Windows lệch {o:+0;-0} ms so với NTP {c.NtpServer}" +
@@ -408,6 +424,7 @@ public sealed class Strings
     {
         var lines = new List<string> { r.Ok ? Saved(r.SessionDir) : StoppedWithErrors(r.SessionDir) };
         if (r.Recording is { } s) lines.Add(FramesSummary(s.Frames, s.Width, s.Height, s.Fps, s.Duplicates, s.Dropped));
+        if (r.Recording?.Audio is { } audio) lines.Add(AudioLine(audio));
         lines.Add(InputEvents(r.InputEvents));
         lines.AddRange(r.ToolErrors);
         if (r.CaptureOk && r.Build is null) lines.Add(NoProfileNoBuild);

@@ -23,9 +23,10 @@ internal sealed class FfmpegEncoder : IDisposable
         };
         var fr = fps.ToString(System.Globalization.CultureInfo.InvariantCulture);
         // The audio input comes first: ffmpeg opens inputs in order, and the pipe's writer waits for it to connect.
-        // Both inputs start at timestamp 0, so audio sample 0 is video frame 0.
+        // Both inputs start at timestamp 0, so audio sample 0 is video frame 0. The audio queue holds ~20 s of 4 KB
+        // packets, so audio running ahead of a stalled video does not block its writer.
         var (audioIn, audioOut) = audio is null ? ("", "")
-            : ($"-f {audio.SampleFormat} -ar {audio.SampleRate} -ac {audio.Channels} -i \"{audio.Pipe}\" ",
+            : ($"-thread_queue_size 1024 -f {audio.SampleFormat} -ar {audio.SampleRate} -ac {audio.Channels} -i \"{audio.Pipe}\" ",
                "-map 1:v -map 0:a -c:a aac -b:a 160k ");
         var args = $"-y -loglevel error {audioIn}-f rawvideo -pix_fmt nv12 -s {width}x{height} -framerate {fr} -i - " +
                    $"{audioOut}{codec} -r {fr} \"{output}\"";

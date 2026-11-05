@@ -58,6 +58,16 @@ internal static class CaptureInterop
     [DllImport("dwmapi.dll")]
     private static extern int DwmGetWindowAttribute(IntPtr hwnd, uint attribute, out RECT value, int size);
 
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
+
+    /// <summary>The process that owns the window: the one whose sound is recorded.</summary>
+    public static int ProcessOf(IntPtr hwnd)
+    {
+        GetWindowThreadProcessId(hwnd, out uint pid);
+        return (int)pid;
+    }
+
     private const uint DWMWA_EXTENDED_FRAME_BOUNDS = 9;
 
     private const uint MONITOR_DEFAULTTOPRIMARY = 1, MONITOR_DEFAULTTONEAREST = 2;

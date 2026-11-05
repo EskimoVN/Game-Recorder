@@ -121,21 +121,18 @@ public sealed partial class MatchCoordinator(OrchestratorOptions options, int ti
 
     /// <summary>
     /// Measures this machine's clock against <paramref name="server"/> (time_server of odx-capture.json) every minute;
-    /// each round records the latest measurement. It never changes the Windows clock.
+    /// each round records the latest measurement and agents get it in Welcome. It never changes the clock.
     /// </summary>
     public async Task MeasureClockAsync(string server, CancellationToken stop)
     {
         while (!stop.IsCancellationRequested)
         {
-            try
-            {
-                var s = SntpClient.Query(server, TimeSpan.FromSeconds(2));
-                Volatile.Write(ref _serverClock, new ServerClock(server, s.SystemOffsetMs, s.RttMs, NtpResponder.NowUnixMs()));
-            }
-            catch (Exception e) when (e is System.Net.Sockets.SocketException or InvalidDataException)
-            {
-                log.LogWarning("time server {Server}: {Error}", server, e.Message);
-            }
+            // Several exchanges, the lowest-RTT one kept: a single one can be tens of ms off on a busy machine.
+            var check = ClockCheck.Measure(server, null);
+            if (check is { NtpOffsetMs: double offset, NtpRttMs: double rtt })
+                Volatile.Write(ref _serverClock, new ServerClock(server, offset, rtt, check.MeasuredAtUtcMs));
+            else
+                log.LogWarning("time server {Server}: {Error}", server, check.NtpError);
             try
             {
                 await Task.Delay(TimeSpan.FromMinutes(1), stop);

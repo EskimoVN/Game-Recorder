@@ -540,6 +540,9 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
         await SendDoneAsync(new Done(s.SessionId, ok, ok ? null : "capture failed"), stop);
         await SendAsync(new AgentState("idle"), stop);
         Log?.Invoke($"{s.SessionId} done: {(ok ? $"kept in {result.SessionDir}" : "capture failed")}");
+        if (result.Recording?.Audio is { } audio && (audio.Source != AudioStatus.FromProcess || audio.SilentRatio > 0.99 || audio.Error is not null))
+            Log?.Invoke($"{s.SessionId} audio: {audio.Source}{(audio.FallbackReason is { } f ? $" ({f})" : "")}" +
+                        $"{(audio.SilentRatio is double r ? $", {r:P0} silent" : "")}{(audio.Error is { } e ? $", {e}" : "")}");
         RoundKept?.Invoke(s.SessionId, result.SessionDir, ok);
         lock (_gate)
         {

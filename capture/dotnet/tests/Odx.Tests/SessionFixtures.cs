@@ -33,13 +33,16 @@ public static class SessionFixtures
         }
     }
 
-    public static void MakeVideo(string path, int nFrames = NFrames, int width = Width, int height = Height, int fps = Fps)
+    /// <param name="audio">Also a 440 Hz AAC track (48 kHz stereo), as odx record --audio writes one.</param>
+    public static void MakeVideo(string path, int nFrames = NFrames, int width = Width, int height = Height, int fps = Fps, bool audio = false)
     {
         var psi = new ProcessStartInfo("ffmpeg") { UseShellExecute = false, RedirectStandardError = true };
-        foreach (var a in new[] { "-v", "error", "-y", "-f", "lavfi", "-i", $"testsrc=size={width}x{height}:rate={fps}",
-                     "-frames:v", nFrames.ToString(CultureInfo.InvariantCulture), "-c:v", "libx264", "-bf", "0",
-                     "-pix_fmt", "yuv420p", path })
-            psi.ArgumentList.Add(a);
+        string[] audioIn = audio ? ["-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000"] : [];
+        string[] audioOut = audio ? ["-ac", "2", "-c:a", "aac", "-shortest"] : [];
+        string[] args = ["-v", "error", "-y", "-f", "lavfi", "-i", $"testsrc=size={width}x{height}:rate={fps}", .. audioIn,
+                         "-frames:v", nFrames.ToString(CultureInfo.InvariantCulture), "-c:v", "libx264", "-bf", "0",
+                         "-pix_fmt", "yuv420p", .. audioOut, path];
+        foreach (var a in args) psi.ArgumentList.Add(a);
         using var p = Process.Start(psi)!;
         string err = p.StandardError.ReadToEnd();
         p.WaitForExit();

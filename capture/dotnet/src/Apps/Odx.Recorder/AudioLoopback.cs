@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.IO.Pipes;
 using System.Runtime.InteropServices;
 using NAudio.CoreAudioApi;
@@ -13,39 +14,50 @@ internal sealed record AudioInput(string SampleFormat, int SampleRate, int Chann
 
 /// <summary>
 /// Streams what one process tree plays (WASAPI process loopback: the game only, not voice chat, browsers or system
-/// sounds, on whatever device it plays), or else the whole default playback device, as PCM into a named pipe that the video's ffmpeg
-/// muxes into video.mp4, with sample 0 at <see cref="SetOrigin"/> on the QPC clock (the first video grid tick).
-/// Packets are placed by their QPC position. WASAPI delivers nothing while nothing plays, so silence is written up to
-/// <see cref="LagMs"/> behind now: the audio keeps pace with the video and ffmpeg never waits for it. The device clock's
-/// drift against QPC is absorbed by padding or trimming once it exceeds <see cref="ToleranceMs"/>.
+/// sounds, on whatever device it plays), or else the whole default playback device, as PCM into a named pipe that the
+/// video's ffmpeg muxes into video.mp4, with sample 0 at <see cref="SetOrigin"/> on the QPC clock (the first video grid
+/// tick). Packets are placed by their QPC capture time (<see cref="AudioTimeline"/>), or by their arrival when the
+/// device's times turn out not to be on the QPC clock. WASAPI delivers nothing while nothing plays, so silence is written
+/// up to <see cref="LagMs"/> behind now: the audio keeps pace with the video and ffmpeg never waits for it.
+/// The capture thread only queues bytes; a writer thread owns the pipe, so a stalled ffmpeg never stalls the capture
+/// (WASAPI's buffer would overflow and lose sound). <see cref="Status"/> tells what was recorded and how it went.
 /// </summary>
 internal sealed class AudioLoopback : IDisposable
 {
-    private const double ToleranceMs = 20;
+    private const double QpcToleranceMs = 20, ArrivalToleranceMs = 100;
     // Longer than a packet takes to arrive (10 ms polling + the device period), so real sound is not overwritten.
     private const double LagMs = 100;
+    /// <summary>A packet whose capture time is this far from now is not on the QPC clock.</summary>
+    private const double MaxQpcSkewMs = 1000;
+    private const long BufferHns = 20_000_000;  // 2 s of WASAPI buffer (a hint; a stalled capture thread then loses less)
+    private const int QueuedChunks = 4096;        // ~40 s of 10 ms packets, or 4096 s of 1 s silence chunks
+    private const double SilentDbfs = -60;
 
     private readonly AudioClient _client;
     private readonly AudioCaptureClient _capture;
     private readonly NamedPipeServerStream _pipe;
     private readonly Task _connected;
-    private readonly List<byte[]> _pending = [];
-    private readonly Thread _thread;
+    private readonly BlockingCollection<byte[]> _queue = new(QueuedChunks);
+    private readonly Thread _thread, _writer;
     private readonly AutoResetEvent _packetReady = new(false);
-    private readonly List<(byte[] Data, double QpcMs)> _early = [];
+    private readonly List<(byte[] Data, double QpcMs, bool Silent)> _early = [];
     private readonly object _gate = new();
     private readonly int _bytesPerFrame;
+    private readonly bool _float;
+    private readonly AudioTimeline _timeline;
     private volatile bool _stopping;
-    private double? _originMs;
-    private long _framesWritten;
+    private string? _timing;
+    private double? _qpcOffsetMs;
+    private long _packets, _discontinuities, _droppedBytes, _silentFrames;
+    private double _peak;
 
     public AudioInput Input { get; }
     /// <summary>The game process recorded; null when the whole default playback device is.</summary>
     public int? ProcessId { get; }
     /// <summary>The playback device recorded; null when only the game process is.</summary>
     public string? Device { get; }
-    public double? OriginMs => _originMs;
-    /// <summary>Why audio stopped being written (ffmpeg closed the pipe).</summary>
+    public double? OriginMs => _timeline.OriginMs;
+    /// <summary>Why audio stopped being written (ffmpeg closed the pipe or never opened it).</summary>
     public string? Error { get; private set; }
 
     /// <param name="processId">The game's process; processes it starts are included.</param>
@@ -59,13 +71,15 @@ internal sealed class AudioLoopback : IDisposable
         // A process loopback client has no mix format: Windows converts the game's audio to the one asked for.
         var format = WaveFormat.CreateIeeeFloatWaveFormat(48000, 2);
         _bytesPerFrame = format.BlockAlign;
+        _float = true;
         _client.Initialize(AudioClientShareMode.Shared,
             AudioClientStreamFlags.Loopback | AudioClientStreamFlags.EventCallback | AudioClientStreamFlags.AutoConvertPcm,
-            1_000_000, 0, format, Guid.Empty);
+            BufferHns, 0, format, Guid.Empty);
         _client.SetEventHandle(_packetReady.SafeWaitHandle.DangerousGetHandle());
         _capture = _client.AudioCaptureClient;
         (_pipe, _connected, Input) = OpenPipe("f32le", format);
-        _thread = new Thread(Run) { IsBackground = true, Name = "audio loopback" };
+        _timeline = new AudioTimeline(format.SampleRate, QpcToleranceMs);
+        (_thread, _writer) = Threads();
     }
 
     /// <summary>Everything the default playback device plays (voice chat and other apps included); polled every 10 ms.</summary>
@@ -84,16 +98,23 @@ internal sealed class AudioLoopback : IDisposable
             _ => throw new NotSupportedException($"audio mix format {format} is not supported"),
         };
         _bytesPerFrame = format.BlockAlign;
-        _client.Initialize(AudioClientShareMode.Shared, AudioClientStreamFlags.Loopback, 1_000_000, 0, format, Guid.Empty);
+        _float = sampleFormat == "f32le";
+        _client.Initialize(AudioClientShareMode.Shared, AudioClientStreamFlags.Loopback, BufferHns, 0, format, Guid.Empty);
         _capture = _client.AudioCaptureClient;
         (_pipe, _connected, Input) = OpenPipe(sampleFormat, format);
-        _thread = new Thread(Run) { IsBackground = true, Name = "audio loopback" };
+        _timeline = new AudioTimeline(format.SampleRate, QpcToleranceMs);
+        (_thread, _writer) = Threads();
     }
+
+    private (Thread Capture, Thread Writer) Threads() =>
+        (new Thread(Run) { IsBackground = true, Name = "audio loopback" },
+         new Thread(WritePipe) { IsBackground = true, Name = "audio pipe" });
 
     private static (NamedPipeServerStream, Task, AudioInput) OpenPipe(string sampleFormat, WaveFormat format)
     {
         string name = "odx-audio-" + Guid.NewGuid().ToString("N");
-        var pipe = new NamedPipeServerStream(name, PipeDirection.Out, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+        var pipe = new NamedPipeServerStream(name, PipeDirection.Out, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous,
+            inBufferSize: 0, outBufferSize: 1 << 20);
         return (pipe, pipe.WaitForConnectionAsync(), new AudioInput(sampleFormat, format.SampleRate, format.Channels, @"\\.\pipe\" + name));
     }
 
@@ -107,16 +128,13 @@ internal sealed class AudioLoopback : IDisposable
     {
         _client.Start();
         _thread.Start();
+        _writer.Start();
     }
 
-    /// <summary>
-    /// QPC time (ms) of sample 0; packets captured before it are held until it is known. No pipe write here: the caller
-    /// holds the video lock, and ffmpeg reads no more audio until the first video frame is in, so the audio thread
-    /// writes the held packets.
-    /// </summary>
+    /// <summary>QPC time (ms) of sample 0; packets captured before it are held until it is known.</summary>
     public void SetOrigin(double qpcMs)
     {
-        lock (_gate) _originMs ??= qpcMs;
+        lock (_gate) _timeline.SetOrigin(qpcMs);
     }
 
     /// <summary>Pads to <paramref name="stopQpcMs"/> and closes the pipe, so ffmpeg sees the audio end.</summary>
@@ -127,14 +145,30 @@ internal sealed class AudioLoopback : IDisposable
         _client.Stop();
         lock (_gate)
         {
-            _originMs ??= stopQpcMs;
+            _timeline.SetOrigin(stopQpcMs);
             PlaceEarly();
-            WriteSilence(FrameAt(stopQpcMs) - _framesWritten);
-            if (!_connected.Wait(TimeSpan.FromSeconds(10))) Error ??= "ffmpeg did not open the audio pipe";
-            else Flush();
+            Enqueue(Silence(_timeline.SilenceTo(stopQpcMs)));
         }
+        _queue.CompleteAdding();
+        if (!_writer.Join(TimeSpan.FromSeconds(10))) Error ??= "ffmpeg stopped reading the audio pipe";
         _pipe.Dispose();
     }
+
+    /// <summary>What is being recorded, and the counters so far (final after <see cref="Finish"/>).</summary>
+    public AudioStatus Status(string? fallbackReason = null)
+    {
+        lock (_gate)
+        {
+            long written = _timeline.FramesWritten;
+            return new AudioStatus(ProcessId is null ? AudioStatus.FromDevice : AudioStatus.FromProcess, ProcessId, Device, fallbackReason,
+                Error, _timing, _packets, _discontinuities, _timeline.PaddedFrames, _timeline.TrimmedFrames, _droppedBytes,
+                _packets == 0 ? null : Math.Round(Dbfs(_peak), 1),
+                written == 0 ? null : Math.Round((double)Math.Min(written, _silentFrames + _timeline.PaddedFrames) / written, 4),
+                _qpcOffsetMs is double q ? Math.Round(q, 1) : null);
+        }
+    }
+
+    private static double Dbfs(double peak) => peak <= 0 ? -100 : Math.Max(-100, 20 * Math.Log10(peak));
 
     private void Run()
     {
@@ -146,13 +180,19 @@ internal sealed class AudioLoopback : IDisposable
                 // qpcPosition is in 100 ns units (IAudioCaptureClient::GetBuffer).
                 IntPtr buffer = _capture.GetBuffer(out int frames, out AudioClientBufferFlags flags, out _, out long qpc);
                 var data = new byte[frames * _bytesPerFrame];
-                if ((flags & AudioClientBufferFlags.Silent) == 0)
-                    System.Runtime.InteropServices.Marshal.Copy(buffer, data, 0, data.Length);
+                bool silent = (flags & AudioClientBufferFlags.Silent) != 0;
+                if (!silent) Marshal.Copy(buffer, data, 0, data.Length);
                 _capture.ReleaseBuffer(frames);
-                double at = qpc / 10_000.0;
+                double now = QpcClock.NowMs(), at = Timestamp(qpc / 10_000.0, frames, now);
+                double peak = silent ? 0 : Peak(data);
                 lock (_gate)
                 {
-                    if (_originMs is null) _early.Add((data, at));
+                    _packets++;
+                    if ((flags & AudioClientBufferFlags.DataDiscontinuity) != 0) _discontinuities++;
+                    _peak = Math.Max(_peak, peak);
+                    silent |= Dbfs(peak) < SilentDbfs;
+                    if (silent) _silentFrames += frames;
+                    if (_timeline.OriginMs is null) _early.Add((data, at, silent));
                     else
                     {
                         PlaceEarly();
@@ -162,77 +202,109 @@ internal sealed class AudioLoopback : IDisposable
             }
             lock (_gate)
             {
-                if (_originMs is null) continue;
+                if (_timeline.OriginMs is null) continue;
                 PlaceEarly();
-                WriteSilence(FrameAt(QpcClock.NowMs() - LagMs) - _framesWritten);
+                Enqueue(Silence(_timeline.SilenceTo(QpcClock.NowMs() - LagMs)));
             }
         }
     }
 
+    /// <summary>
+    /// Where the packet was captured on the QPC clock. The first packet decides whether the device's qpcPosition is on
+    /// that clock (within <see cref="MaxQpcSkewMs"/> of now); if not, packets are placed by when they arrived, a device
+    /// period late at most, with a wider tolerance for the arrival jitter.
+    /// </summary>
+    private double Timestamp(double qpcMs, int frames, double nowMs)
+    {
+        if (_timing is null)
+        {
+            _qpcOffsetMs = qpcMs - nowMs;
+            bool onQpc = qpcMs > 0 && Math.Abs(qpcMs - nowMs) <= MaxQpcSkewMs;
+            _timing = onQpc ? "qpc" : "arrival";
+            if (!onQpc) _timeline.ToleranceMs = ArrivalToleranceMs;
+        }
+        return _timing == "qpc" ? qpcMs : nowMs - frames * 1000.0 / Input.SampleRate;
+    }
+
+    private double Peak(byte[] data)
+    {
+        double peak = 0;
+        if (_float)
+            foreach (float v in MemoryMarshal.Cast<byte, float>(data)) peak = Math.Max(peak, Math.Abs(v));
+        else
+            foreach (short v in MemoryMarshal.Cast<byte, short>(data)) peak = Math.Max(peak, Math.Abs(v) / 32768.0);
+        return peak;
+    }
+
     private void PlaceEarly()
     {
-        foreach (var (data, at) in _early) Place(data, at);
+        foreach (var (data, at, _) in _early) Place(data, at);
         _early.Clear();
     }
 
-    private long FrameAt(double qpcMs) => (long)Math.Round((qpcMs - _originMs!.Value) * Input.SampleRate / 1000);
-
     private void Place(byte[] data, double qpcMs)
     {
-        long start = FrameAt(qpcMs), tolerance = (long)(ToleranceMs * Input.SampleRate / 1000);
-        int skip = 0;
-        if (start > _framesWritten + tolerance) WriteSilence(start - _framesWritten);
-        else if (start < _framesWritten - tolerance) skip = (int)Math.Min(_framesWritten - start, data.Length / _bytesPerFrame);
-        Write(data, skip * _bytesPerFrame, data.Length - skip * _bytesPerFrame);
-        _framesWritten += data.Length / _bytesPerFrame - skip;
+        var (pad, skip) = _timeline.Place(qpcMs, data.Length / _bytesPerFrame);
+        Enqueue(Silence(pad));
+        if (skip == 0) Enqueue(data);
+        else if (skip * _bytesPerFrame < data.Length) Enqueue(data[(skip * _bytesPerFrame)..]);
     }
 
-    private void WriteSilence(long frames)
+    private IEnumerable<byte[]> Silence(long frames)
     {
-        if (frames <= 0) return;
-        var zeros = new byte[Math.Min(frames, Input.SampleRate) * _bytesPerFrame];
-        for (long left = frames; left > 0; left -= zeros.Length / _bytesPerFrame)
-            Write(zeros, 0, (int)Math.Min(left * _bytesPerFrame, zeros.Length));
-        _framesWritten += frames;
-    }
-
-    /// <summary>Held in memory until ffmpeg has opened the pipe (it starts with the first video frame).</summary>
-    private void Write(byte[] data, int offset, int count)
-    {
-        if (Error is not null || count == 0) return;
-        if (!_connected.IsCompleted)
+        while (frames > 0)
         {
-            _pending.Add(data.AsSpan(offset, count).ToArray());
+            int chunk = (int)Math.Min(frames, Input.SampleRate);
+            yield return new byte[chunk * _bytesPerFrame];
+            frames -= chunk;
+        }
+    }
+
+    private void Enqueue(IEnumerable<byte[]> chunks)
+    {
+        foreach (var chunk in chunks) Enqueue(chunk);
+    }
+
+    /// <summary>Queues for the writer; when it is a whole queue behind, the oldest chunk goes (counted) so capture never blocks.</summary>
+    private void Enqueue(byte[] chunk)
+    {
+        if (chunk.Length == 0 || _queue.IsAddingCompleted) return;
+        while (!_queue.TryAdd(chunk))
+        {
+            if (_queue.TryTake(out var dropped)) _droppedBytes += dropped.Length;
+        }
+    }
+
+    private void WritePipe()
+    {
+        // ffmpeg opens the pipe once it starts, with the first video frame; the queue holds the sound until then.
+        if (!_connected.Wait(TimeSpan.FromSeconds(30)))
+        {
+            Error = "ffmpeg did not open the audio pipe";
+            foreach (var _ in _queue.GetConsumingEnumerable()) { }
             return;
         }
-        Flush();
-        Send(data, offset, count);
-    }
-
-    private void Flush()
-    {
-        foreach (var chunk in _pending) Send(chunk, 0, chunk.Length);
-        _pending.Clear();
-    }
-
-    private void Send(byte[] data, int offset, int count)
-    {
-        if (Error is not null) return;
-        try
+        foreach (var chunk in _queue.GetConsumingEnumerable())
         {
-            _pipe.Write(data, offset, count);
-        }
-        catch (IOException e)
-        {
-            Error = $"audio pipe closed: {e.Message}";
+            if (Error is not null) continue;  // drain, so the capture thread's queue never fills for nothing
+            try
+            {
+                _pipe.Write(chunk, 0, chunk.Length);
+            }
+            catch (IOException e)
+            {
+                Error = $"audio pipe closed: {e.Message}";
+            }
         }
     }
 
     public void Dispose()
     {
+        _queue.CompleteAdding();
         _client.Dispose();
         _pipe.Dispose();
         _packetReady.Dispose();
+        _queue.Dispose();
     }
 }
 
@@ -268,6 +340,7 @@ internal static class ProcessLoopback
         [MarshalAs(UnmanagedType.LPStruct)] Guid riid, IntPtr activationParams,
         IActivateAudioInterfaceCompletionHandler completionHandler, out IActivateAudioInterfaceAsyncOperation operation);
 
+    /// <exception cref="TimeoutException">Windows did not complete the activation within 5 s.</exception>
     public static AudioClient Activate(int processId)
     {
         int paramsSize = Marshal.SizeOf<ActivationParams>();

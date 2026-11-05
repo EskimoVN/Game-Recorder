@@ -4,7 +4,8 @@ namespace Odx.Core;
 
 /// <param name="Frames">Samples (= frames for H.264 without B-frame reordering) in the first video track.</param>
 /// <param name="DurationSeconds">Movie duration from mvhd.</param>
-public sealed record Mp4Info(int Width, int Height, long Frames, double DurationSeconds);
+/// <param name="HasAudio">The file has a sound track (hdlr "soun").</param>
+public sealed record Mp4Info(int Width, int Height, long Frames, double DurationSeconds, bool HasAudio = false);
 
 /// <summary>
 /// Reads what the validator needs from an MP4 (ISO BMFF) file without ffprobe: walks the box tree to the movie header and
@@ -39,11 +40,16 @@ public static class Mp4Reader
 
         var mvhd = Child(moov, "mvhd") ?? throw new InvalidDataException("no mvhd box");
         double duration = Duration(mvhd);
+        Mp4Info? video = null;
+        bool hasAudio = false;
         foreach (var trak in Children(moov, "trak"))
         {
             var mdia = Child(trak, "mdia");
             var hdlr = mdia is null ? null : Child(mdia.Value, "hdlr");
-            if (hdlr is null || hdlr.Value.Length < 12 || Type(hdlr.Value.Span[8..12]) != "vide") continue;
+            if (hdlr is null || hdlr.Value.Length < 12) continue;
+            string handler = Type(hdlr.Value.Span[8..12]);
+            hasAudio |= handler == "soun";
+            if (handler != "vide" || video is not null) continue;
             var stbl = Child(mdia!.Value, "minf") is { } minf ? Child(minf, "stbl") : null;
             var stsd = stbl is null ? null : Child(stbl.Value, "stsd");
             var stsz = stbl is null ? null : Child(stbl.Value, "stsz");
@@ -56,9 +62,9 @@ public static class Mp4Reader
             // stsz: version/flags(4) sample_size(4) sample_count(4).
             if (stsz.Value.Length < 12) throw new InvalidDataException("short stsz box");
             long frames = BinaryPrimitives.ReadUInt32BigEndian(stsz.Value.Span[8..]);
-            return new Mp4Info(width, height, frames, duration);
+            video = new Mp4Info(width, height, frames, duration);
         }
-        throw new InvalidDataException("no video track");
+        return video is null ? throw new InvalidDataException("no video track") : video with { HasAudio = hasAudio };
     }
 
     private static (string Type, int HeaderSize, long Size) ReadHeader(Stream s, long remaining)

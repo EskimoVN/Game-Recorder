@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 
 namespace Odx.Core;
@@ -7,12 +8,14 @@ namespace Odx.Core;
 /// One line of <c>odx record --json-status</c> stdout: <c>started</c> once capture runs, <c>progress</c> every second,
 /// <c>stopped</c> at the end (with <c>Error</c> if it failed). Read by the capture host to show live counters.
 /// </summary>
+/// <param name="Audio">The audio track's state when --audio was asked: on <c>started</c> where the sound comes from, on
+/// <c>stopped</c> its counters too. Null without --audio.</param>
 public sealed record RecorderStatus(string Event, long Frames = 0, long Duplicates = 0, long Dropped = 0, int Width = 0,
-    int Height = 0, double Fps = 0, string? Error = null)
+    int Height = 0, double Fps = 0, string? Error = null, AudioStatus? Audio = null)
 {
     public const string Started = "started", Progress = "progress", Stopped = "stopped";
 
-    private static readonly JsonSerializerOptions Options = new()
+    public static readonly JsonSerializerOptions Options = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
@@ -33,4 +36,26 @@ public sealed record RecorderStatus(string Event, long Frames = 0, long Duplicat
             return null;
         }
     }
+}
+
+/// <summary>
+/// What odx record's audio track holds and how it went (RecorderStatus.Audio, recording.json → audio, player.json →
+/// recording.audio), so a missing, fallen-back or silent track is seen, not found by listening.
+/// </summary>
+/// <param name="Source">"process" (the game's own sound, WASAPI process loopback), "device" (everything the default
+/// playback device plays) or "none" (not recorded: <paramref name="Error"/> says why).</param>
+/// <param name="FallbackReason">Why the game's own sound could not be recorded, when "device" stands in for it.</param>
+/// <param name="Timing">"qpc": packets placed by their WASAPI capture time; "arrival": by when they arrived, because the
+/// capture times were not on the QPC clock (<paramref name="QpcOffsetMs"/> says how far off the first one was).</param>
+/// <param name="Discontinuities">Packets WASAPI flagged as following a gap (its buffer overflowed).</param>
+/// <param name="DroppedBytes">PCM dropped because ffmpeg read the pipe too slowly for too long.</param>
+/// <param name="PeakDbfs">The loudest sample of the whole track; null when nothing was captured.</param>
+/// <param name="SilentRatio">Share of the track that is silence: padding plus packets flagged silent or below −60 dBFS.</param>
+public sealed record AudioStatus(string Source, int? ProcessId = null, string? Device = null, string? FallbackReason = null,
+    string? Error = null, string? Timing = null, long Packets = 0, long Discontinuities = 0, long PaddedFrames = 0,
+    long TrimmedFrames = 0, long DroppedBytes = 0, double? PeakDbfs = null, double? SilentRatio = null, double? QpcOffsetMs = null)
+{
+    public const string FromProcess = "process", FromDevice = "device", NotRecorded = "none";
+
+    public JsonNode ToNode() => JsonSerializer.SerializeToNode(this, RecorderStatus.Options)!;
 }

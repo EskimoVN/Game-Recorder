@@ -91,6 +91,8 @@ public static class SessionBuilder
             ["vendor_clock_sync"] = ClockJson(clock),
             // Not in the spec: the recorder's id of this recording, distinct from the round's session_id.
             ["vendor_capture_id"] = captureId,
+            // Not in the spec: the audio track's source and health (odx record --audio; null without it).
+            ["vendor_audio"] = recording["audio"]?["status"]?.DeepClone(),
         };
         File.WriteAllText(Path.Combine(captureDir, "session.json"), session.ToJsonString(Json));
         WriteKeyBindings(captureDir, profile);

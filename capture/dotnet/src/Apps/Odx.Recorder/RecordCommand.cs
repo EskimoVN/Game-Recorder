@@ -10,7 +10,8 @@
 //                           other apps), or of everything the default playback device plays when no game process is known
 //   <dir>/video_frames.csv  frame_index,t_grid_qpc_ms,t_source_qpc_ms,duplicate
 //   <dir>/recording.json    capture id, capture and screen size, fps, encoder, start time (UTC + QPC),
-//                           counts of duplicated/dropped frames, audio (null without --audio)
+//                           counts of duplicated/dropped frames, audio (null without --audio: sample rate, channels,
+//                           start, and a status: source process|device|none, fallback reason, timing, counters)
 // --obs: OBS records instead, with its own scene, output and audio settings (ObsRecorder); the WebSocket password, if
 // any, comes from the ODX_OBS_PASSWORD environment variable. The same three files are written.
 // Stop with Ctrl+C, --seconds, --stop-event (a named event set by Odx.App), or by closing the captured window.
@@ -58,7 +59,7 @@ public static class RecordCommand
                 return 1;
             }
             window = proc.MainWindowHandle;
-            gameProcessId = proc.Id;
+            gameProcessId = CaptureInterop.ProcessOf(window);  // the window's owner, not the first process of that name
             item = CaptureInterop.ItemForWindow(window);
             monitor = CaptureInterop.MonitorOf(window);
         }
@@ -97,7 +98,7 @@ public static class RecordCommand
         Nv12Converter? converter = null;
         (ID3D11Texture2D Staging, double T)? pending = null;   // converted, read when the next frame arrives
         AudioLoopback? audio = null;
-        string? audioError = null;
+        string? audioError = null, audioFallback = null;
 
         // The video size is fixed by the first frame, not item.Size: a windowed game's item can be larger than its frames
         // (1296x759 item, 1282x752 frames, seen on Arma Reforger), so the encoder starts once the first frame is in.
@@ -120,22 +121,40 @@ public static class RecordCommand
         double? firstFrameLatencyMs = null;
         if (opts.Audio)
         {
-            try
+            if (opts.AudioProcess is string audioProcess && gameProcessId is null)
             {
-                if (opts.AudioProcess is string audioProcess)
-                    gameProcessId = Process.GetProcessesByName(Path.GetFileNameWithoutExtension(audioProcess)).FirstOrDefault()?.Id;
-                // No game process known: the whole playback device, voice chat and other apps included.
-                audio = gameProcessId is int pid ? new AudioLoopback(pid) : new AudioLoopback();
-                audio.Start();
+                var candidates = Process.GetProcessesByName(Path.GetFileNameWithoutExtension(audioProcess));
+                gameProcessId = (candidates.FirstOrDefault(p => p.MainWindowHandle != IntPtr.Zero) ?? candidates.FirstOrDefault())?.Id;
             }
-            catch (Exception e)
+            // The game's own sound when its process is known and Windows can single it out; else the whole playback
+            // device (voice chat and other apps included), with the reason kept; else no audio, with the reason kept.
+            if (gameProcessId is int pid)
             {
-                audio?.Dispose();
-                audio = null;
-                audioError = e.Message;
-                Console.Error.WriteLine($"audio not recorded: {e.Message}");
+                try
+                {
+                    audio = new AudioLoopback(pid);
+                }
+                catch (Exception e)
+                {
+                    audioFallback = e.Message;
+                    Console.Error.WriteLine($"game audio not available, recording the playback device: {e.Message}");
+                }
             }
+            if (audio is null)
+            {
+                try
+                {
+                    audio = new AudioLoopback();
+                }
+                catch (Exception e)
+                {
+                    audioError = audioFallback is null ? e.Message : $"{audioFallback}; playback device: {e.Message}";
+                    Console.Error.WriteLine($"audio not recorded: {e.Message}");
+                }
+            }
+            audio?.Start();
         }
+        AudioStatus? AudioNow() => !opts.Audio ? null : audio?.Status(audioFallback) ?? new AudioStatus(AudioStatus.NotRecorded, Error: audioError);
 
         // The ticks show the frame on screen until now; next (null at stop) replaces it.
         void Emit(IReadOnlyList<GridTick> ticks, byte[]? next)
@@ -199,7 +218,7 @@ public static class RecordCommand
 
         session.StartCapture();
         if (opts.JsonStatus)
-            Console.WriteLine(new RecorderStatus(RecorderStatus.Started, Width: width, Height: height, Fps: opts.Fps).ToJson());
+            Console.WriteLine(new RecorderStatus(RecorderStatus.Started, Width: width, Height: height, Fps: opts.Fps, Audio: AudioNow()).ToJson());
         else
             Console.WriteLine($"recording {width}x{height} @ {opts.Fps} fps to {opts.OutDir} (Ctrl+C to stop)");
         using (var progress = opts.JsonStatus ? new Timer(_ =>
@@ -229,7 +248,6 @@ public static class RecordCommand
         frameLog.Flush();
         session.Dispose();
         framePool.Dispose();
-        object? audioMeta = audioError is null ? null : new Dictionary<string, object?> { ["error"] = audioError };
         if (audio is not null)
         {
             // Video ends first: ffmpeg stops reading the audio pipe while it waits for video, so audio's final padding would
@@ -237,16 +255,8 @@ public static class RecordCommand
             encoder.EndVideo();
             audio.Finish(stopQpcMs);
             if (audio.Error is not null) Console.Error.WriteLine($"audio: {audio.Error}");
-            audioMeta = new Dictionary<string, object?>
-            {
-                ["process_id"] = audio.ProcessId,
-                ["device"] = audio.Device,
-                ["sample_rate"] = audio.Input.SampleRate,
-                ["channels"] = audio.Input.Channels,
-                ["start_qpc_ms"] = audio.OriginMs,
-                ["error"] = audio.Error,
-            };
         }
+        var audioStatus = AudioNow();
         int ffmpegExit = encoder.Finish();
         encoder.Dispose();
         audio?.Dispose();
@@ -273,7 +283,13 @@ public static class RecordCommand
             ["first_frame_capture_latency_ms"] = firstFrameLatencyMs,
             ["ffmpeg_exit_code"] = ffmpegExit,
             ["error"] = error,
-            ["audio"] = audioMeta,
+            ["audio"] = audioStatus is null ? null : new Dictionary<string, object?>
+            {
+                ["sample_rate"] = audio?.Input.SampleRate,
+                ["channels"] = audio?.Input.Channels,
+                ["start_qpc_ms"] = audio?.OriginMs,
+                ["status"] = audioStatus.ToNode(),
+            },
         };
         File.WriteAllText(Path.Combine(opts.OutDir, "recording.json"),
             JsonSerializer.Serialize(meta, new JsonSerializerOptions
@@ -286,7 +302,7 @@ public static class RecordCommand
         if (opts.JsonStatus)
         {
             Console.WriteLine(new RecorderStatus(RecorderStatus.Stopped, framesWritten, resampler.Duplicates,
-                resampler.DroppedSourceFrames, width, height, opts.Fps, error).ToJson());
+                resampler.DroppedSourceFrames, width, height, opts.Fps, error, audioStatus).ToJson());
         }
         else
         {
