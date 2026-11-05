@@ -130,6 +130,36 @@ public sealed class CaptureRun : ICaptureRun
 
     public static CaptureRun Start(CaptureOptions options) => new(options);
 
+    /// <summary>
+    /// <c>odx record --probe</c> on the source a round would record: the window of <paramref name="windowProcess"/>, else
+    /// the monitor of <paramref name="gameProcess"/>'s window (the primary without one). Null when odx could not run.
+    /// </summary>
+    public static async Task<CaptureProbe?> ProbeAsync(string? windowProcess, string? gameProcess)
+    {
+        var psi = new ProcessStartInfo(ExternalTools.Odx())
+        {
+            UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true,
+        };
+        var args = new List<string> { "record", "--probe", "--out", Path.Combine(Path.GetTempPath(), "odx-probe") };
+        args.AddRange(windowProcess is string p ? ["--window", p] : ["--monitor"]);
+        if (windowProcess is null && gameProcess is string g) args.AddRange(["--audio-process", g]);
+        foreach (string a in args) psi.ArgumentList.Add(a);
+        try
+        {
+            using var process = Process.Start(psi)!;
+            var output = process.StandardOutput.ReadToEndAsync();
+            var errors = process.StandardError.ReadToEndAsync();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            await process.WaitForExitAsync(timeout.Token);
+            await errors;
+            return (await output).Split('\n').Select(line => CaptureProbe.TryParse(line.Trim())).FirstOrDefault(r => r is not null);
+        }
+        catch (Exception e) when (e is System.ComponentModel.Win32Exception or OperationCanceledException or IOException or InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
     public void Stop() => _stop.Set();
 
     /// <param name="env">The OBS password, passed in the environment so that no other process sees it on a command line.</param>

@@ -134,6 +134,8 @@ public sealed class Strings
     public required Func<double, string> ClockWarning { get; init; }
     /// <summary>One line on the audio track of a recording (odx record --audio).</summary>
     public required Func<AudioStatus, string> AudioLine { get; init; }
+    /// <summary>The room status line for the capture probe (what a round would record, and whether it can be).</summary>
+    public required Func<CaptureProbe, string> CaptureLine { get; init; }
     /// <summary>The room status line for the pre-round clock check (null: still measuring).</summary>
     public required Func<ClockCheck?, string> ClockLine { get; init; }
     public required string ClockSyncing { get; init; }
@@ -260,6 +262,10 @@ public sealed class Strings
         ClockSystem = "Clock: Windows clock only (NTP not measured — check time_server in odx-capture.json)",
         ConfigInvalid = error => $"Settings file not valid, the Windows clock is used: {error}",
         ClockWarning = offset => $"Warning: the Windows clock is {Math.Abs(offset) / 1000:F1} s off; fix Windows time sync.",
+        CaptureLine = c => c.Ok
+            ? $"Capture: {c.Source} {c.Width}x{c.Height}{(c.WindowStyle is { } s ? $" ({s})" : "")} ✓"
+            : c.Frames == 0 ? $"Capture: {c.Source} gives no frames — is the game window open and not minimized?"
+            : $"Capture: {c.Source} is BLACK — exclusive fullscreen cannot be recorded: set the game to borderless or windowed (or pick the monitor as source), then press Ready again",
         AudioLine = a => (a.Source switch
             {
                 AudioStatus.FromProcess => "Audio: the game's own sound",
@@ -398,6 +404,10 @@ public sealed class Strings
         ClockSystem = "Đồng hồ: chỉ dùng đồng hồ Windows (chưa đo được NTP — kiểm tra time_server trong odx-capture.json)",
         ConfigInvalid = error => $"File cấu hình không hợp lệ, dùng đồng hồ Windows: {error}",
         ClockWarning = offset => $"Cảnh báo: đồng hồ Windows lệch {Math.Abs(offset) / 1000:F1} giây; hãy sửa đồng bộ giờ của Windows.",
+        CaptureLine = c => c.Ok
+            ? $"Ghi hình: {c.Source} {c.Width}x{c.Height}{(c.WindowStyle is { } s ? $" ({s})" : "")} ✓"
+            : c.Frames == 0 ? $"Ghi hình: {c.Source} không có frame — cửa sổ game đã mở và không bị thu nhỏ chứ?"
+            : $"Ghi hình: {c.Source} TOÀN ĐEN — fullscreen exclusive không ghi được: chuyển game sang borderless hoặc windowed (hoặc chọn nguồn là màn hình), rồi bấm Sẵn sàng lại",
         AudioLine = a => (a.Source switch
             {
                 AudioStatus.FromProcess => "Âm thanh: tiếng riêng của game",

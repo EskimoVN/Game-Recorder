@@ -33,3 +33,18 @@ public class RecorderStatusTests
     [InlineData("{not json")]
     public void Other_lines_are_ignored(string line) => Assert.Null(RecorderStatus.TryParse(line));
 }
+
+public class CaptureProbeTests
+{
+    [Fact]
+    public void Round_trips_and_a_black_or_frameless_source_is_not_ok()
+    {
+        var probe = new CaptureProbe(1920, 1080, 10, false, 97.3, "borderless", "window:ArmaReforgerSteam");
+        Assert.True(probe.Ok);
+        Assert.Equal(probe, CaptureProbe.TryParse(probe.ToJson()));
+        Assert.Contains("\"window_style\":\"borderless\"", probe.ToJson());
+        Assert.False((probe with { Black = true }).Ok);
+        Assert.False((probe with { Frames = 0, Black = false }).Ok);
+        Assert.Null(CaptureProbe.TryParse("recording 1920x1080"));
+    }
+}

@@ -131,7 +131,7 @@ sealed class LauncherForm : Form
 
         AddLabel("Display", 85);
         _window = new RadioButton { Text = "Window", Location = new Point(110, 84), AutoSize = true };
-        _fullscreen = new RadioButton { Text = "Fullscreen", Location = new Point(200, 84), AutoSize = true };
+        _fullscreen = new RadioButton { Text = "Fullscreen (game setting; only borderless records)", Location = new Point(200, 84), AutoSize = true };
         (settings["fullscreen"] == "true" ? _fullscreen : _window).Checked = true;
         Controls.AddRange(new Control[] { _window, _fullscreen });
 

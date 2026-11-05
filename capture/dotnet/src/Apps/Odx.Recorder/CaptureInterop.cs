@@ -61,6 +61,25 @@ internal static class CaptureInterop
     [DllImport("user32.dll")]
     private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
 
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetWindowLongPtrW(IntPtr hwnd, int index);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
+
+    private const int GWL_STYLE = -16;
+    private const long WS_CAPTION = 0x00C00000;
+
+    /// <summary>"windowed" (title bar), "borderless" (no frame, exactly its monitor) or "popup" (no frame, smaller).</summary>
+    public static string WindowStyle(IntPtr hwnd, IntPtr monitor)
+    {
+        if ((GetWindowLongPtrW(hwnd, GWL_STYLE).ToInt64() & WS_CAPTION) == WS_CAPTION) return "windowed";
+        var info = new MONITORINFO { Size = Marshal.SizeOf<MONITORINFO>() };
+        if (!GetWindowRect(hwnd, out RECT rect) || !GetMonitorInfoW(monitor, ref info)) return "popup";
+        var m = info.Monitor;
+        return rect.Left <= m.Left && rect.Top <= m.Top && rect.Right >= m.Right && rect.Bottom >= m.Bottom ? "borderless" : "popup";
+    }
+
     /// <summary>The process that owns the window: the one whose sound is recorded.</summary>
     public static int ProcessOf(IntPtr hwnd)
     {
@@ -109,10 +128,10 @@ internal static class CaptureInterop
         return i.CreateForWindow(hwnd, ref iid);
     });
 
-    public static GraphicsCaptureItem ItemForPrimaryMonitor() => CreateItem(i =>
+    public static GraphicsCaptureItem ItemForMonitor(IntPtr monitor) => CreateItem(i =>
     {
         var iid = GraphicsCaptureItemIid;
-        return i.CreateForMonitor(PrimaryMonitor(), ref iid);
+        return i.CreateForMonitor(monitor, ref iid);
     });
 
     private static GraphicsCaptureItem CreateItem(Func<IGraphicsCaptureItemInterop, IntPtr> create)

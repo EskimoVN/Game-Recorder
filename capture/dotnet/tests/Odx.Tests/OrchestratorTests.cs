@@ -320,6 +320,22 @@ public sealed class OrchestratorTests : IAsyncLifetime
         Assert.True(good.IsReady);
     }
 
+    [Fact]
+    public async Task ABlackCaptureSourceCannotBeReadyUntilProbedAgain()
+    {
+        var black = new CaptureProbe(1920, 1080, 10, true, 0, "popup", "window:game");
+        var (agent, _) = Connect(null, "p1", _room);
+        agent.ProbeCapture = (_, _) => Task.FromResult<CaptureProbe?>(black);
+        await WaitForAgents(1);
+        for (int i = 0; i < 200 && agent.Capture is null; i++) await Task.Delay(50);
+
+        Assert.Equal(black, agent.Capture);
+        Assert.False(await agent.SetReadyAsync(true, _stop.Token));
+        agent.ProbeCapture = (_, _) => Task.FromResult<CaptureProbe?>(black with { Black = false, LumaMean = 80, WindowStyle = "borderless" });
+        Assert.True(await agent.SetReadyAsync(true, _stop.Token));  // probed again: the game is borderless now
+        Assert.True(agent.Capture!.Ok);
+    }
+
     [SkippableFact]
     public async Task ARoundWhoseClocksAreOffNtpFailsTheGate()
     {

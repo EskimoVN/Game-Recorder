@@ -663,6 +663,7 @@ public partial class MainWindow : Window
         SyncClockButton.Visibility = clockOff && !_syncingClock ? Visibility.Visible : Visibility.Collapsed;
         SetStatus(t => t.RoomStatus(room.Code, host, members) + (round is null ? "" : "\n" + round(t)) +
                        (_config.TimeServer is null ? "" : "\n" + (_syncingClock ? t.ClockSyncing : t.ClockLine(clock))) +
+                       (session.Agent.Capture is { } capture ? "\n" + t.CaptureLine(capture) : "") +
                        (lan is null ? "" : "\n" + t.LanStatus(lan)) +
                        (packets is { } on ? "\n" + (on ? t.PacketsOn : t.PacketsOff) : "") + "\n" + log + "\n" +
                        (host ? t.HostHint(hotkey) : ready ? t.ReadyOn(hotkey) : t.ReadyHint(hotkey)));

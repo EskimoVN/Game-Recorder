@@ -32,6 +32,8 @@ public sealed class RoomSession : IDisposable
         };
         Agent.PacketCaptureWanted += wanted => _ = WantPacketsAsync();
         Agent.ClockChecked += _ => Changed?.Invoke();
+        Agent.ProbeCapture = CaptureRun.ProbeAsync;
+        Agent.CaptureProbed += _ => Changed?.Invoke();
     }
 
     /// <summary>Measures the clock again (after a sync); null when not connected.</summary>

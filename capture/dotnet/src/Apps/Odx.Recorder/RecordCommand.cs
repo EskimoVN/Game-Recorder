@@ -1,8 +1,12 @@
 ﻿// odx record --out <dir> (--window <process name> | --monitor) [--fps 60] [--encoder auto|x264|nvenc|mf] [--ffmpeg <path>]
 //            [--cursor] [--audio [--audio-process <process name>]] [--obs <host:port>] [--seconds N] [--stop-event <name>]
-//            [--json-status]
+//            [--json-status] [--probe]
 //
-// Records a game window (or the primary monitor) with Windows.Graphics.Capture. Every captured frame carries its QPC
+// Records a game window, or a monitor (the one the --audio-process game's window is on, else the primary), with
+// Windows.Graphics.Capture. A window must be windowed or borderless: an exclusive-fullscreen window gives black frames,
+// which --probe tells (captures up to 2 s, prints a CaptureProbe JSON line, records nothing). A window whose size
+// changes while recording (alt-tab out of fullscreen) keeps the recording going on its last frame until the size is
+// back (size_changed_frames in recording.json). Every captured frame carries its QPC
 // capture time (SystemRelativeTime), the same clock as odx input. Frames are resampled onto a constant-rate grid
 // (GridResampler) and piped to ffmpeg, so the MP4 is CFR and its frame N is row N of video_frames.csv. Writes:
 //   <dir>/video.mp4         CFR H.264, no B-frames; --audio: plus an AAC track, sample 0 at video frame 0, of the game
@@ -34,7 +38,7 @@ public static class RecordCommand
         if (opts is null)
         {
             Console.Error.WriteLine("usage: odx record --out <dir> (--window <process name> | --monitor) [--fps 60] " +
-                                    "[--encoder auto|x264|nvenc|mf] [--ffmpeg <path>] [--cursor] [--audio [--audio-process <process name>]] [--obs <host:port>] [--seconds N] [--stop-event <name>] [--json-status]");
+                                    "[--encoder auto|x264|nvenc|mf] [--ffmpeg <path>] [--cursor] [--audio [--audio-process <process name>]] [--obs <host:port>] [--seconds N] [--stop-event <name>] [--json-status] [--probe]");
             return 2;
         }
         if (opts.Obs is string obs) return RunObs(opts, obs);
@@ -49,6 +53,7 @@ public static class RecordCommand
         GraphicsCaptureItem item;
         IntPtr monitor, window = IntPtr.Zero;
         int? gameProcessId = null;
+        string source = $"window:{opts.Window}";
         if (opts.Window is string processName)
         {
             var proc = Process.GetProcessesByName(Path.GetFileNameWithoutExtension(processName))
@@ -65,8 +70,13 @@ public static class RecordCommand
         }
         else
         {
-            item = CaptureInterop.ItemForPrimaryMonitor();
-            monitor = CaptureInterop.PrimaryMonitor();
+            // The game's monitor when its process is known (a fullscreen game on a second monitor), else the primary.
+            var gameWindow = opts.AudioProcess is string game
+                ? Process.GetProcessesByName(Path.GetFileNameWithoutExtension(game)).FirstOrDefault(p => p.MainWindowHandle != IntPtr.Zero)
+                : null;
+            monitor = gameWindow is null ? CaptureInterop.PrimaryMonitor() : CaptureInterop.MonitorOf(gameWindow.MainWindowHandle);
+            item = CaptureInterop.ItemForMonitor(monitor);
+            source = gameWindow is null ? "monitor:primary" : $"monitor:{opts.AudioProcess}";
         }
 
         int frameWidth = item.Size.Width, frameHeight = item.Size.Height;
@@ -103,16 +113,21 @@ public static class RecordCommand
         // The video size is fixed by the first frame, not item.Size: a windowed game's item can be larger than its frames
         // (1296x759 item, 1282x752 frames, seen on Arma Reforger), so the encoder starts once the first frame is in.
         // A window is cropped to its client area: the video is the game's picture, without title bar and borders.
-        FfmpegEncoder StartEncoder()
+        Nv12Converter StartConverter()
         {
             (cropX, cropY, width, height) = window == IntPtr.Zero
                 ? (0, 0, frameWidth, frameHeight)
                 : CaptureInterop.ClientArea(window, frameWidth, frameHeight);
             converter = new Nv12Converter(d3d, context, cropX, cropY, width, height);
             (width, height) = (converter.Width, converter.Height);
+            return converter;
+        }
+        FfmpegEncoder StartEncoder()
+        {
+            var nv12 = StartConverter();
             var started = new FfmpegEncoder(opts.Ffmpeg, Path.Combine(opts.OutDir, "video.mp4"), width, height, opts.Fps,
                 encoderName.Result, audio?.Input);
-            writer = new FrameWriter(started, frameLog, converter.FrameBytes);
+            writer = new FrameWriter(started, frameLog, nv12.FrameBytes);
             shown = writer.Rent();
             return started;
         }
@@ -173,6 +188,26 @@ public static class RecordCommand
             Emit(resampler.Advance(p.T), incoming);
         }
 
+        long sizeChangedFrames = 0;
+        int probeFrames = 0;
+        bool probeBlack = true;
+        double probeLuma = 0;
+        // Converts the frame and looks at its luma: all under 32 (16 is black in the limited range) is a black frame.
+        bool Probe(Direct3D11CaptureFrame frame)
+        {
+            var nv12 = converter ??= StartConverter();
+            using var texture = CaptureInterop.Texture(frame.Surface);
+            var buffer = new byte[nv12.FrameBytes];
+            nv12.Read(nv12.Convert(texture), buffer);
+            var luma = buffer.AsSpan(0, nv12.Width * nv12.Height);
+            long sum = 0;
+            byte max = 0;
+            foreach (byte y in luma) { sum += y; if (y > max) max = y; }
+            probeLuma += (double)sum / luma.Length;
+            probeBlack &= max < 32;
+            return ++probeFrames >= 10;
+        }
+
         framePool.FrameArrived += (pool, _) =>
         {
             lock (gate)
@@ -185,11 +220,17 @@ public static class RecordCommand
                     framePool.Recreate(winRtDevice, DirectXPixelFormat.B8G8R8A8UIntNormalized, 2, frame.ContentSize);
                     return;
                 }
+                if (opts.Probe)
+                {
+                    if (Probe(frame)) stop.Set();
+                    return;
+                }
                 encoder ??= StartEncoder();
                 if (frame.ContentSize.Width != frameWidth || frame.ContentSize.Height != frameHeight)
                 {
-                    error = $"capture size changed to {frame.ContentSize.Width}x{frame.ContentSize.Height}; restart recording";
-                    stop.Set();
+                    // The game changed size or mode (alt-tab out of fullscreen): its frames no longer fit the video, so the
+                    // last good frame stays on screen (GridResampler duplicates it) until the size is back or the stop.
+                    sizeChangedFrames++;
                     return;
                 }
                 if (writer!.Error is string writeError)
@@ -217,6 +258,18 @@ public static class RecordCommand
         }
 
         session.StartCapture();
+        if (opts.Probe)
+        {
+            stop.Wait(TimeSpan.FromSeconds(2));
+            lock (gate) stopped = true;
+            session.Dispose();
+            framePool.Dispose();
+            converter?.Dispose();
+            Console.WriteLine(new CaptureProbe(width, height, probeFrames, probeFrames > 0 && probeBlack,
+                probeFrames > 0 ? Math.Round(probeLuma / probeFrames, 1) : 0,
+                window == IntPtr.Zero ? null : CaptureInterop.WindowStyle(window, monitor), source).ToJson());
+            return 0;
+        }
         if (opts.JsonStatus)
             Console.WriteLine(new RecorderStatus(RecorderStatus.Started, Width: width, Height: height, Fps: opts.Fps, Audio: AudioNow()).ToJson());
         else
@@ -272,7 +325,7 @@ public static class RecordCommand
             ["screen_height"] = screenHeight,
             ["fps"] = opts.Fps,
             ["encoder"] = encoderName.Result,
-            ["source"] = opts.Window is null ? "monitor:primary" : $"window:{opts.Window}",
+            ["source"] = source,
             ["cursor"] = opts.Cursor,
             ["started_utc"] = startUtc.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
             ["started_qpc_ms"] = startQpcMs,
@@ -280,6 +333,7 @@ public static class RecordCommand
             ["frames"] = framesWritten,
             ["duplicate_frames"] = resampler.Duplicates,
             ["dropped_source_frames"] = resampler.DroppedSourceFrames,
+            ["size_changed_frames"] = sizeChangedFrames,
             ["first_frame_capture_latency_ms"] = firstFrameLatencyMs,
             ["ffmpeg_exit_code"] = ffmpegExit,
             ["error"] = error,
@@ -299,6 +353,8 @@ public static class RecordCommand
             }));
 
         if (error is null && ffmpegExit != 0) error = $"ffmpeg exited with code {ffmpegExit}";
+        if (sizeChangedFrames > 0)
+            Console.Error.WriteLine($"{sizeChangedFrames} captured frames had another size (the game changed mode); the last frame before stood in");
         if (opts.JsonStatus)
         {
             Console.WriteLine(new RecorderStatus(RecorderStatus.Stopped, framesWritten, resampler.Duplicates,
@@ -348,12 +404,12 @@ public static class RecordCommand
 }
 
 internal sealed record Options(string OutDir, string? Window, double Fps, string Encoder, string Ffmpeg, bool Cursor,
-    bool Audio, string? AudioProcess, string? Obs, double? Seconds, string? StopEvent, bool JsonStatus)
+    bool Audio, string? AudioProcess, string? Obs, double? Seconds, string? StopEvent, bool JsonStatus, bool Probe)
 {
     public static Options? Parse(string[] args)
     {
         string? outDir = null, window = null, encoder = "auto", ffmpeg = ExternalTools.Ffmpeg(), stopEvent = null, audioProcess = null, obs = null;
-        bool monitor = false, cursor = false, audio = false, jsonStatus = false;
+        bool monitor = false, cursor = false, audio = false, jsonStatus = false, probe = false;
         double fps = 60;
         double? seconds = null;
         var inv = System.Globalization.CultureInfo.InvariantCulture;
@@ -375,10 +431,11 @@ internal sealed record Options(string OutDir, string? Window, double Fps, string
                 case "--seconds" when double.TryParse(Next(), System.Globalization.NumberStyles.Float, inv, out var s): seconds = s; break;
                 case "--stop-event": stopEvent = Next(); break;
                 case "--json-status": jsonStatus = true; break;
+                case "--probe": probe = true; break;
                 default: return null;
             }
         }
         if (outDir is null || encoder is null || ffmpeg is null || (window is null) == !monitor || fps <= 0) return null;
-        return new Options(outDir, window, fps, encoder, ffmpeg, cursor, audio, audioProcess, obs, seconds, stopEvent, jsonStatus);
+        return new Options(outDir, window, fps, encoder, ffmpeg, cursor, audio, audioProcess, obs, seconds, stopEvent, jsonStatus, probe);
     }
 }

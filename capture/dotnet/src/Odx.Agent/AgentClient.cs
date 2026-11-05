@@ -98,6 +98,20 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
 
     public event Action<ClockCheck>? ClockChecked;
 
+    /// <summary>
+    /// Runs <c>odx record --probe</c> on the window to record (null: the monitor) and the game's process (the profile's,
+    /// for the monitor it is on), set by the owner; null (tests) probes nothing. The result is <see cref="Capture"/>: a
+    /// source that gives no frames or black ones (exclusive fullscreen) keeps the player from being ready.
+    /// </summary>
+    public Func<string?, string?, Task<CaptureProbe?>>? ProbeCapture { get; set; }
+
+    public CaptureProbe? Capture { get; private set; }
+
+    public event Action<CaptureProbe?>? CaptureProbed;
+
+    /// <summary>The room's game wants its packets recorded (spec v3 §2.3), so <see cref="Packets"/> must be there to be ready.</summary>
+    public bool PacketsWanted { get; private set; }
+
     public RoomUpdate? Room { get; private set; }
 
     public bool IsHost => Room?.HostPlayerId == options.PlayerId;
@@ -227,7 +241,9 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
         return socket;
     }
 
-    /// <returns>False when ready was refused: the Windows clock is off NTP, or not checked yet (<see cref="Clock"/> says which).</returns>
+    /// <returns>False when ready was refused: the Windows clock is off NTP or not checked yet (<see cref="Clock"/>), the
+    /// capture source gives nothing usable (<see cref="Capture"/>, probed again first), or the game's packet capture was
+    /// declined (<see cref="Packets"/>).</returns>
     public async Task<bool> SetReadyAsync(bool ready, CancellationToken stop)
     {
         if (ready && options.TimeServer is not null && Clock is not { Ok: true })
@@ -238,10 +254,35 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
                 : "not ready: the clock check has not finished yet");
             return false;
         }
+        if (ready && Capture is { Ok: false } && (await CheckCaptureAsync()) is { Ok: false } probe)
+        {
+            Log?.Invoke(probe.Frames == 0
+                ? $"not ready: {probe.Source} gives no frames (window minimized or gone?)"
+                : $"not ready: {probe.Source} is black — exclusive fullscreen cannot be recorded: set the game to borderless/windowed, or record the monitor");
+            return false;
+        }
+        if (ready && PacketsWanted && Packets is null)
+        {
+            Log?.Invoke("not ready: this game's packets must be recorded (spec v3 §2.3) and the administrator prompt was declined; restart Odx Capture and allow it");
+            return false;
+        }
         IsReady = ready;
         await SendAsync(new Ready(ready), stop);
         Log?.Invoke(ready ? "ready" : "not ready");
         return true;
+    }
+
+    /// <summary>Probes the source that a round would record (<see cref="ProbeCapture"/>); null when there is no prober.</summary>
+    public async Task<CaptureProbe?> CheckCaptureAsync()
+    {
+        if (ProbeCapture is not { } probe) return null;
+        var result = await probe(WindowToRecord(), _profileWindow);
+        Capture = result;
+        Log?.Invoke(result is null ? "capture probe: could not run odx record"
+            : result.Ok ? $"capture probe: {result.Source} {result.Width}x{result.Height}{(result.WindowStyle is { } style ? $" ({style})" : "")} ok"
+            : result.Frames == 0 ? $"capture probe: {result.Source} gives no frames" : $"capture probe: {result.Source} is black");
+        CaptureProbed?.Invoke(result);
+        return result;
     }
 
     /// <summary>
@@ -377,9 +418,17 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
                 _serverClock = w.ServerClock;
                 Volatile.Write(ref _reconnectGraceMs, w.ReconnectGraceMs);
                 _ = Task.Run(() => CheckClockAsync(stop), stop);
-                if (w.GameProfileJson is { } welcomeProfile &&
-                    GameProfile.Parse(JsonNode.Parse(welcomeProfile)!.AsObject(), "orchestrator").Network is { } network)
-                    PacketCaptureWanted?.Invoke(network);
+                if (w.GameProfileJson is { } welcomeProfile)
+                {
+                    var profile = GameProfile.Parse(JsonNode.Parse(welcomeProfile)!.AsObject(), "orchestrator");
+                    _profileWindow = profile.WindowProcess;
+                    if (profile.Network is { } network)
+                    {
+                        PacketsWanted = true;
+                        PacketCaptureWanted?.Invoke(network);
+                    }
+                }
+                _ = Task.Run(CheckCaptureAsync, stop);
                 break;
             case RoomUpdate r:
                 bool joined = Room?.Code != r.Code;
