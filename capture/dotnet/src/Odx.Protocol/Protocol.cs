@@ -74,7 +74,8 @@ public abstract record AgentMessage
 }
 
 /// <summary>Agent → orchestrator, first message.</summary>
-/// <param name="MachineId">Stable per machine but not the machine name (a hash of it).</param>
+/// <param name="MachineId">A random id made once per installation (data\machine-id), so machines cloned from one image or
+/// sharing a name stay apart.</param>
 /// <param name="SteamId">The Steam account signed in on the machine (SteamID64), to match the player in the game server's
 /// state; null without Steam.</param>
 /// <param name="Role"><see cref="PlayerRole"/>, or <see cref="GameServerRole"/>: the game server's agent, which records the

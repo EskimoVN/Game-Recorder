@@ -309,9 +309,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
         LanChanged?.Invoke(null);
     }
 
-    private static string MachineId =>
-        Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(Environment.MachineName)))[..16]
-            .ToLowerInvariant();
+    private static string MachineId => MachineIdentity.Get();
 
     /// <summary>
     /// The Steam account signed in on this machine as a SteamID64, from the Steam client's registry entry (the account id
