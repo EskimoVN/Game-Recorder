@@ -131,7 +131,10 @@ public static class WebSocketText
 /// </summary>
 /// <param name="ReconnectGraceMs">How long a round keeps an agent that lost its connection; it records on meanwhile and
 /// stops by itself once this has passed without a reconnect.</param>
-public sealed record Welcome(int TimePort, string? GameProfileJson = null, int ReconnectGraceMs = 30_000) : AgentMessage;
+/// <param name="ServerClock">The orchestrator's clock against its NTP server (spec v3 §4 layer 1 on the reference side);
+/// null while it has not measured it.</param>
+public sealed record Welcome(int TimePort, string? GameProfileJson = null, int ReconnectGraceMs = 30_000,
+    ServerClock? ServerClock = null) : AgentMessage;
 
 /// <summary>Orchestrator → agent: prepare a session; the game profile (JSON) is the one the build must use.</summary>
 public sealed record Arm(string SessionId, string GameProfileJson, int Fps) : AgentMessage;

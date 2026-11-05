@@ -12,7 +12,8 @@ public sealed record BuildReport(string SessionId, int FrameCount, double Durati
     int CameraFrames, ClockSync Clock);
 
 /// <summary>Where the session's UTC times come from (spec v3 §4: NTP baseline plus measured offset and RTT).</summary>
-/// <param name="Source">"ntp" (ntp_samples.csv), "system" (Windows clock, clock_samples.csv) or "recording" (recording.json).</param>
+/// <param name="Source">"sntp" (ntp_samples.csv: SNTP against <paramref name="Server"/>, a real NTP server alone or the
+/// orchestrator's time service in a room), "system" (Windows clock, clock_samples.csv) or "recording" (recording.json).</param>
 /// <param name="RttMs">Median round trip of the NTP samples used.</param>
 /// <param name="SystemOffsetMs">Median of how far the Windows clock was behind the NTP server (negative: ahead).</param>
 public sealed record ClockSync(string Source, string? Server, int Samples, double? RttMs, double? SystemOffsetMs);
@@ -185,7 +186,7 @@ public static class SessionBuilder
         if (ntp.Count > 0)
         {
             var best = ntp.OrderBy(s => s.RttMs).Take((ntp.Count + 1) / 2).OrderBy(s => s.TQpcMs).ToList();
-            var sync = new ClockSync("ntp", string.Join(",", best.Select(s => s.Server).Distinct()), best.Count,
+            var sync = new ClockSync("sntp", string.Join(",", best.Select(s => s.Server).Distinct()), best.Count,
                 Median(best.Select(s => s.RttMs)), Median(ntp.Select(s => s.SystemOffsetMs)));
             return (ClockMap.Fit(best.Select(s => (s.TQpcMs, s.UtcUnixMs)).ToList()), sync);
         }

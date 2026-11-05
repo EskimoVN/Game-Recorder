@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.Net;
+using System.Net.Sockets;
 using System.Net.Http.Json;
 using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Builder;
@@ -65,6 +67,9 @@ public sealed class OrchestratorTests : IAsyncLifetime
     private WebApplication _app = null!;
     private HttpClient _http = null!;
     private MatchCoordinator _coordinator = null!;
+    /// <summary>A real (well, local) NTP server for the orchestrator and the agents: spec v3 §4 layer 1.</summary>
+    private UdpClient _ntp = null!;
+    private string _ntpServer = null!;
     private readonly List<AgentClient> _agents = [];
     /// <summary>A room without a host (as a game server plugin opens one); most tests use it.</summary>
     private string _room = null!;
@@ -77,7 +82,11 @@ public sealed class OrchestratorTests : IAsyncLifetime
             {"game_title": "Synthetic", "platform": "PC", "localization": "en-US",
              "input_mouse_convention": {"maps_to": "camera_look_velocity"}, "bindings": {"W": "Forward"}}
             """);
-        _app = OrchestratorHost.Build(new OrchestratorOptions(profile, HttpPort: 0, TimePort: 0, Fps: SessionFixtures.Fps), "127.0.0.1");
+        _ntp = NtpResponder.Bind(0);
+        _ = NtpResponder.RunAsync(_ntp, _stop.Token);
+        _ntpServer = $"127.0.0.1:{((IPEndPoint)_ntp.Client.LocalEndPoint!).Port}";
+        _app = OrchestratorHost.Build(new OrchestratorOptions(profile, HttpPort: 0, TimePort: 0, Fps: SessionFixtures.Fps) { TimeServer = _ntpServer },
+            "127.0.0.1");
         await _app.StartAsync();
         _http = new HttpClient { BaseAddress = new Uri(_app.Urls.First()) };
         _coordinator = _app.Services.GetRequiredService<MatchCoordinator>();
@@ -88,6 +97,7 @@ public sealed class OrchestratorTests : IAsyncLifetime
     public async Task DisposeAsync()
     {
         _stop.Cancel();
+        _ntp.Dispose();
         await _app.StopAsync();
         await _app.DisposeAsync();
         try
@@ -121,11 +131,12 @@ public sealed class OrchestratorTests : IAsyncLifetime
         players.Select(p => Connect(template, p, _room).Started).ToList();
 
     /// <param name="room">Invite code to join; null opens a new room with this player as host.</param>
-    private (AgentClient Agent, TaskCompletionSource Started) Connect(string? template, string player, string? room)
+    /// <param name="timeServer">The NTP server the agent checks its clock against before being ready; null skips the check.</param>
+    private (AgentClient Agent, TaskCompletionSource Started) Connect(string? template, string player, string? room, string? timeServer = null)
     {
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var agent = new AgentClient(new AgentOptions(_http.BaseAddress!, player, player.ToUpperInvariant(),
-            Path.Combine(_root, "agent-" + player), null, RoomCode: room, CreateRoom: room is null), options =>
+            Path.Combine(_root, "agent-" + player), null, RoomCode: room, CreateRoom: room is null, TimeServer: timeServer), options =>
         {
             try
             {
@@ -269,6 +280,70 @@ public sealed class OrchestratorTests : IAsyncLifetime
         var files = Directory.GetFiles(assembled, "*", SearchOption.AllDirectories).Select(f => Path.GetRelativePath(assembled, f)).Order().ToList();
         Assert.Equal(files, Directory.GetFiles(merged, "*", SearchOption.AllDirectories).Select(f => Path.GetRelativePath(merged, f)).Order());
         Assert.All(files, f => Assert.True(File.ReadAllBytes(Path.Combine(assembled, f)).SequenceEqual(File.ReadAllBytes(Path.Combine(merged, f))), f));
+    }
+
+    /// <summary>Spec v3 §4 layer 1: a Windows clock off NTP cannot be ready, and a round recorded with one fails the gate.</summary>
+    [Fact]
+    public async Task AClockOffNtpCannotBeReady()
+    {
+        using var skewed = NtpResponder.Bind(0);
+        string skewedServer = $"127.0.0.1:{((IPEndPoint)skewed.Client.LocalEndPoint!).Port}";
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                while (!_stop.IsCancellationRequested)
+                {
+                    var request = await skewed.ReceiveAsync(_stop.Token);
+                    double now = NtpResponder.NowUnixMs() + 6507;  // an NTP server 6.5 s ahead of this machine
+                    if (NtpResponder.Reply(request.Buffer, now, now) is { } reply) await skewed.SendAsync(reply, request.RemoteEndPoint, _stop.Token);
+                }
+            }
+            catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException or SocketException)
+            {
+            }
+        });
+        var (off, _) = Connect(null, "p1", _room, timeServer: skewedServer);
+        var (good, _) = Connect(null, "p2", _room, timeServer: _ntpServer);
+        await WaitForAgents(2);
+        for (int i = 0; i < 200 && (off.Clock is null || good.Clock is null); i++) await Task.Delay(50);
+
+        Assert.NotNull(off.Clock);
+        Assert.InRange(off.Clock!.NtpOffsetMs!.Value, 6400, 6600);
+        Assert.False(off.Clock.Ok);
+        Assert.False(await off.SetReadyAsync(true, _stop.Token));
+        Assert.False(off.IsReady);
+        Assert.NotNull(good.Clock);
+        Assert.True(good.Clock!.Ok, $"{good.Clock.NtpOffsetMs} ms, {good.Clock.NtpError}");
+        Assert.NotNull(good.Clock.OrchestratorNtpOffsetMs);
+        Assert.True(await good.SetReadyAsync(true, _stop.Token));
+        Assert.True(good.IsReady);
+    }
+
+    [SkippableFact]
+    public async Task ARoundWhoseClocksAreOffNtpFailsTheGate()
+    {
+        Skip.IfNot(SessionFixtures.HasFfmpeg, "needs ffmpeg + ffprobe");
+        string template = SessionFixtures.MakeValidSession(Path.Combine(_root, "template"));
+        var started = ConnectAgents(template, "p1", "p2");
+        await WaitForAgents(2);
+        var session = NextSession();
+        await Post(new { type = "match_start", match_id = "m7" });
+        await Post(new { type = "round_start" });
+        await Task.WhenAll(started.Select(s => s.Task)).WaitAsync(TimeSpan.FromSeconds(10));
+        await Post(new { type = "round_end" });
+        var (dir, report) = await session;
+        Assert.True(report.Pass, string.Join("; ", report.Issues.Concat(report.Players.SelectMany(p => p.Issues)).Select(i => i.Message)));
+        var system = JsonNode.Parse(File.ReadAllText(Path.Combine(dir, "players", "p1", "player.json")))!["clock_sync"]!["system_clock"]!;
+        Assert.InRange(system["round_offset_ms"]!.GetValue<double>(), -50, 50);
+
+        // The same round with the orchestrator's clock 6.5 s off NTP: every player's clock is then off too.
+        string staging = Path.Combine(_root, "test", report.SessionId);
+        (RoundRecord.Load(staging) with { ServerClock = new ServerClock("ntp.test", 6507, 5, NtpResponder.NowUnixMs()) }).Save(staging);
+        var (_, off) = MultiplayerSession.Assemble(staging, Path.Combine(_root, "out-off"), MergeCommand.Vendor, FixtureTolerances);
+        Assert.False(off.Pass);
+        Assert.Contains(off.Issues, i => i.Rule == "session.server_clock");
+        Assert.All(off.Players, p => Assert.Contains(p.Issues, i => i.Rule == "sync.system_clock"));
     }
 
     private static void CopyDir(string src, string dst)

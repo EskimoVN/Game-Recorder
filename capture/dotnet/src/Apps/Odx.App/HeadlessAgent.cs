@@ -54,7 +54,7 @@ public static class HeadlessAgent
         }
 
         using var session = new RoomSession(new AgentOptions(orchestrator, player, name ?? player, Path.GetFullPath(outRoot), window,
-            RoomCode: room, AutoReady: autoReady, AccessKey: accessKey), CaptureRun.Start, () =>
+            RoomCode: room, AutoReady: autoReady, AccessKey: accessKey, TimeServer: config.TimeServer), CaptureRun.Start, () =>
         {
             if (PktmonCapture.IsElevated) return Task.FromResult<IPacketCapture?>(new PktmonCapture());
             Console.WriteLine($"{DateTime.Now:HH:mm:ss} {player}: this game's packets are recorded only when run as administrator");

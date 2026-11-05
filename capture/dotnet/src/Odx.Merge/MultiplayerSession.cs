@@ -18,6 +18,8 @@ public sealed record GateTolerances
 
     /// <summary>The clock offset is known to ±RTT/2; above this the player's timestamps are not trusted.</summary>
     public double MaxRttMs { get; init; } = 100;
+    /// <summary>Spec v3 §4 layer 1: every machine's Windows clock (players and the orchestrator) within this of NTP.</summary>
+    public double MaxSystemClockOffsetMs { get; init; } = ClockCheck.MaxOffsetMs;
     /// <summary>First frame may come this long after round_start (capture start-up takes ~0.7 s warm, ~3.5 s cold).</summary>
     public double StartGraceMs { get; init; } = 3000;
     /// <summary>Last frame may end this long before the player's stop (round end or permanent death).</summary>
@@ -108,6 +110,11 @@ public static class MultiplayerSession
                 issues.Add(Issue.Error("session.events", $"no {type} event from the game server"));
         if (valid < required)
             issues.Add(Issue.Error("session.min_players", $"{valid} of {round.Players.Count} player streams valid, {required} required"));
+        if (round.ServerClock is not { } serverClock)
+            issues.Add(Issue.Error("session.server_clock", "the orchestrator did not measure its clock against NTP (spec v3 §4 layer 1)"));
+        else if (Math.Abs(serverClock.OffsetMs) > tol.MaxSystemClockOffsetMs)
+            issues.Add(Issue.Error("session.server_clock",
+                $"the orchestrator's clock is {serverClock.OffsetMs:+0;-0} ms off NTP {serverClock.Server} (limit {tol.MaxSystemClockOffsetMs} ms)"));
         if (serverError is not null) issues.Add(Issue.Warning("server.capture", $"the game server's capture could not be read: {serverError}"));
         foreach (string problem in serverProblems) issues.Add(Issue.Warning("server.capture", problem));
         var report = new SessionReport(round.SessionId, issues.All(i => i.Severity != Issue.ErrorSeverity), valid, required, issues, reports);
@@ -456,11 +463,40 @@ public static class MultiplayerSession
         info["clock_sync"] = ClockSync(samples, best, map);
         checks.Add(new QaCheck("sync.clock", $"median RTT to the time service at most {tol.MaxRttMs} ms", rtt <= tol.MaxRttMs,
             $"median RTT {rtt:F1} ms over {samples.Count} samples"));
+        AddSystemClock(round, src, (JsonObject)info["clock_sync"]!, Median(samples.Select(s => s.SystemOffsetMs)), checks, tol);
 
         var frameUtc = PlayerTimeline.FrameUtc(src, map);
         if (frameUtc.Count > 0) return frameUtc;
         checks.Add(new QaCheck("player.frames", "the video has frames", false, "no video frames"));
         return null;
+    }
+
+    /// <summary>
+    /// Spec v3 §4 layer 1 for this player: the Windows clock against NTP during the round = (orchestrator − player, the
+    /// round's samples) + (NTP − orchestrator, the orchestrator's own measurement), plus the agent's pre-round check when
+    /// its clock_check.json is there.
+    /// </summary>
+    private static void AddSystemClock(RoundRecord round, string src, JsonObject clockSync, double offsetToOrchestratorMs,
+        List<QaCheck> checks, GateTolerances tol)
+    {
+        string checkPath = CaptureFolder.Raw(src, ClockCheck.FileName);
+        var system = File.Exists(checkPath) ? PlayerFile.SystemClock(ClockCheck.Load(checkPath)) : new JsonObject();
+        system["tolerance_ms"] = tol.MaxSystemClockOffsetMs;
+        if (round.ServerClock is not { } sc)
+        {
+            system["round_offset_ms"] = null;
+            clockSync["system_clock"] = system;
+            checks.Add(new QaCheck("sync.system_clock", $"Windows clock within {tol.MaxSystemClockOffsetMs} ms of NTP during the round",
+                false, "the orchestrator did not measure its clock against NTP, so the player's cannot be known"));
+            return;
+        }
+        double offset = offsetToOrchestratorMs + sc.OffsetMs;
+        system["round_offset_ms"] = Math.Round(offset, 3);
+        system["round_offset_definition"] = "ntp_clock - player_clock, via the orchestrator";
+        clockSync["system_clock"] = system;
+        checks.Add(new QaCheck("sync.system_clock", $"Windows clock within {tol.MaxSystemClockOffsetMs} ms of NTP during the round",
+            Math.Abs(offset) <= tol.MaxSystemClockOffsetMs,
+            $"NTP - player clock {offset:+0.0;-0.0} ms (orchestrator - player {offsetToOrchestratorMs:+0.0;-0.0} ms, NTP - orchestrator {sc.OffsetMs:+0.0;-0.0} ms)"));
     }
 
     /// <summary>

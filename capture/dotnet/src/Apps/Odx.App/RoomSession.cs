@@ -1,5 +1,6 @@
 using Odx.Agent;
 using Odx.Capture;
+using Odx.Core;
 using Odx.Protocol;
 
 namespace Odx.App;
@@ -30,6 +31,20 @@ public sealed class RoomSession : IDisposable
             if (lan is { Status: "zerotier_missing" }) LanMissing?.Invoke();
         };
         Agent.PacketCaptureWanted += wanted => _ = WantPacketsAsync();
+        Agent.ClockChecked += _ => Changed?.Invoke();
+    }
+
+    /// <summary>Measures the clock again (after a sync); null when not connected.</summary>
+    public async Task<ClockCheck?> CheckClockAsync()
+    {
+        try
+        {
+            return await Agent.CheckClockAsync(_stop.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            return null;
+        }
     }
 
     public AgentClient Agent { get; }

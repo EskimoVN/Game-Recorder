@@ -50,9 +50,28 @@ public static class PlayerFile
                 ["rtt_ms"] = Math.Round(rtt, 3),
             };
         }
+        string checkPath = CaptureFolder.Raw(captureDir, ClockCheck.FileName);
+        if (File.Exists(checkPath)) (json["clock_sync"] ??= new JsonObject())["system_clock"] = SystemClock(ClockCheck.Load(checkPath));
         json["recording"] = new JsonObject { ["video_first_frame_utc"] = UtcText.IsoUs(firstFrameUtcMs) };
         File.WriteAllText(Path.Combine(captureDir, FileName), json.ToJsonString(SessionBuilder.Json));
     }
+
+    /// <summary>
+    /// Spec v3 §4 layer 1, as checked before the round: the Windows clock against a real NTP server (offset = NTP − Windows,
+    /// within <see cref="ClockCheck.MaxOffsetMs"/> to pass), and the orchestrator's own clock against NTP.
+    /// </summary>
+    public static JsonObject SystemClock(ClockCheck c) => new()
+    {
+        ["ntp_server"] = c.NtpServer,
+        ["offset_ms"] = c.NtpOffsetMs is double o ? Math.Round(o, 3) : null,
+        ["rtt_ms"] = c.NtpRttMs is double r ? Math.Round(r, 3) : null,
+        ["error"] = c.NtpError,
+        ["within_tolerance"] = c.Ok,
+        ["tolerance_ms"] = ClockCheck.MaxOffsetMs,
+        ["measured_at_utc"] = UtcText.Iso(c.MeasuredAtUtcMs),
+        ["synced_at_utc"] = c.SyncedAtUtcMs is double s ? UtcText.Iso(s) : null,
+        ["orchestrator_ntp_offset_ms"] = c.OrchestratorNtpOffsetMs is double so ? Math.Round(so, 3) : null,
+    };
 
     /// <summary>clock_sync.offset_ms of a round folder's player.json; null without one.</summary>
     public static double? OffsetMs(string captureDir)

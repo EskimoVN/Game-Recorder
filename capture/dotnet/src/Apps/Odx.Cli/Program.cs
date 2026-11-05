@@ -20,6 +20,7 @@ return command switch
     "input" => Odx.Input.InputCommand.Run(rest),
     "record" => Odx.Recorder.RecordCommand.Run(rest),
     "packet-capture" => PacketCaptureCommand.Run(rest),
+    "clock-sync" => ClockSyncCommand.Run(rest),
 #endif
     "build" => BuildCommand.Run(rest),
     "validate" => ValidateCommand.Run(rest),
@@ -32,7 +33,7 @@ return command switch
 static int Usage()
 {
 #if WINDOWS
-    Console.Error.WriteLine("usage: odx (input | record | build | validate | simulate-game | game-server | merge) [args]");
+    Console.Error.WriteLine("usage: odx (input | record | clock-sync | build | validate | simulate-game | game-server | merge) [args]");
 #else
     Console.Error.WriteLine("usage: odx (build | validate | simulate-game | game-server | merge) [args]");
 #endif

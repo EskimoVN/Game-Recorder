@@ -180,3 +180,26 @@ public class CaptureConfigTests
     public void Invalid_file_is_reported() =>
         Assert.Throws<InvalidDataException>(() => CaptureConfig.Load(Dir("{ time_server")));
 }
+
+public class ClockCheckTests
+{
+    [Fact]
+    public void Within_50_ms_of_ntp_passes_layer_1_and_the_file_round_trips()
+    {
+        var check = new ClockCheck("ntp.test", 50, 12.5, null, "orch:12300", -6507.25, 1, null, 0.5, 1_791_108_000_000, 1_791_108_000_500);
+        Assert.True(check.Ok);
+        Assert.False((check with { NtpOffsetMs = -50.1 }).Ok);
+        Assert.False((check with { NtpOffsetMs = null, NtpError = "timed out" }).Ok);
+        string path = Path.Combine(Path.GetTempPath(), $"odx-clock-{Guid.NewGuid():N}.json");
+        try
+        {
+            check.Save(path);
+            Assert.Contains("\"ntp_offset_ms\": 50", File.ReadAllText(path));
+            Assert.Equal(check, ClockCheck.Load(path));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+}

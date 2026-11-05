@@ -83,4 +83,7 @@ elif grep -q '^ODX_DOMAIN=capture.example.com$' .env; then
 fi
 [ -z "$3" ] || sed -i "s/^ODX_GAME_PROFILE=.*/ODX_GAME_PROFILE=$3/" .env
 bash up.sh
+# The orchestrator's SNTP responder answers from this clock (spec v3 §4 layer 1): it must be NTP-synchronized.
+sudo timedatectl set-ntp true
+echo "Host clock NTP-synchronized: $(timedatectl show -p NTPSynchronized --value)"
 EOF

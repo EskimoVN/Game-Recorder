@@ -16,8 +16,12 @@ namespace Odx.Agent;
 /// <param name="AutoReady">Says ready whenever it is idle in a room between rounds (headless capture machines).</param>
 /// <param name="AccessKey">The orchestrator's access key (access_key in odx-capture.json), sent with every request.</param>
 /// <param name="Lan">With <paramref name="CreateRoom"/>: the new room gets a virtual LAN (ZeroTier).</param>
+/// <param name="TimeServer">A real NTP server (time_server of odx-capture.json) the Windows clock is checked against before
+/// a round (spec v3 §4 layer 1): a clock further than <see cref="ClockCheck.MaxOffsetMs"/> off cannot be ready. Null skips
+/// the check.</param>
 public sealed record AgentOptions(Uri Orchestrator, string PlayerId, string Name, string OutputRoot, string? WindowProcess,
-    string? RoomCode = null, bool CreateRoom = false, bool AutoReady = false, string? AccessKey = null, bool Lan = false);
+    string? RoomCode = null, bool CreateRoom = false, bool AutoReady = false, string? AccessKey = null, bool Lan = false,
+    string? TimeServer = null);
 
 /// <param name="Status">"joining", "ok", "zerotier_missing" (not installed, or its tray app never ran), "error".</param>
 /// <param name="Address">This machine's IP on the room's LAN once "ok"; the error text for "error".</param>
@@ -25,17 +29,19 @@ public sealed record LanState(string NetworkId, string Status, string? Address =
 
 /// <summary>
 /// A player's capture machine under the orchestrator, in one room: on Start it records into &lt;OutputRoot&gt;/&lt;session&gt;/
-/// (sampling its clock against the orchestrator's time service, checked once on Welcome), on Stop it lets the capture build
+/// (sampling its clock against the orchestrator's time service; its Windows clock is checked against NTP and the time
+/// service on Welcome and on demand, <see cref="CheckClockAsync"/>), on Stop it lets the capture build
 /// and validate the session and reports Done. The folder stays, and gets the round's files (<see cref="RoundFiles"/>) once
 /// everyone is done, with a <see cref="Manifest"/>. odx-app runs this, in its room mode or headless.
 /// </summary>
 public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICaptureRun> startCapture)
 {
-    private static readonly TimeSpan NtpTimeout = TimeSpan.FromSeconds(2), Retry = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan Retry = TimeSpan.FromSeconds(5);
 
     private readonly SemaphoreSlim _sendLock = new(1, 1);
     private ClientWebSocket? _socket;
     private string? _timeServer;
+    private ServerClock? _serverClock;
     private Arm? _armed;
     private string? _profilePath;
     private string? _profileWindow;
@@ -86,6 +92,11 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
 
     /// <summary>Whether this player is ready for the next round; the orchestrator clears it when play starts.</summary>
     public bool IsReady { get; private set; }
+
+    /// <summary>The latest clock check (null until the first one after Welcome completes).</summary>
+    public ClockCheck? Clock { get; private set; }
+
+    public event Action<ClockCheck>? ClockChecked;
 
     public RoomUpdate? Room { get; private set; }
 
@@ -216,11 +227,38 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
         return socket;
     }
 
-    public async Task SetReadyAsync(bool ready, CancellationToken stop)
+    /// <returns>False when ready was refused: the Windows clock is off NTP, or not checked yet (<see cref="Clock"/> says which).</returns>
+    public async Task<bool> SetReadyAsync(bool ready, CancellationToken stop)
     {
+        if (ready && options.TimeServer is not null && Clock is not { Ok: true })
+        {
+            Log?.Invoke(Clock is { NtpOffsetMs: double off }
+                ? $"not ready: the Windows clock is {off:+0;-0} ms off NTP (limit {ClockCheck.MaxOffsetMs} ms); sync it first"
+                : Clock is { NtpError: { } error } ? $"not ready: NTP {options.TimeServer} did not answer ({error})"
+                : "not ready: the clock check has not finished yet");
+            return false;
+        }
         IsReady = ready;
         await SendAsync(new Ready(ready), stop);
         Log?.Invoke(ready ? "ready" : "not ready");
+        return true;
+    }
+
+    /// <summary>
+    /// Measures the Windows clock against NTP (<see cref="AgentOptions.TimeServer"/>) and the orchestrator's time service,
+    /// a few seconds; with <see cref="AgentOptions.AutoReady"/> it then readies the player it was waiting for.
+    /// </summary>
+    public async Task<ClockCheck> CheckClockAsync(CancellationToken stop)
+    {
+        var check = await Task.Run(() => ClockCheck.Measure(options.TimeServer, _timeServer), stop);
+        if (_serverClock is { } sc) check = check with { OrchestratorNtpOffsetMs = sc.OffsetMs, OrchestratorNtpMeasuredAtUtcMs = sc.MeasuredAtUtcMs };
+        Clock = check;
+        Log?.Invoke($"clock: NTP {(check.NtpServer is null ? "not checked" : check.NtpOffsetMs is double n ? $"{n:+0.0;-0.0} ms" : check.NtpError)}; " +
+                    $"time service {(check.ReferenceOffsetMs is double r ? $"{r:+0.0;-0.0} ms" : check.ReferenceError ?? "not checked")}" +
+                    (check.OrchestratorNtpOffsetMs is double o ? $"; orchestrator vs NTP {o:+0.0;-0.0} ms" : "; orchestrator has not measured NTP"));
+        ClockChecked?.Invoke(check);
+        if (options.AutoReady && !IsHost && !IsReady && Room is { CurrentSession: null }) await SetReadyAsync(true, stop);
+        return check;
     }
 
     /// <summary>
@@ -336,8 +374,9 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
                 throw new IncompatibleException(i);
             case Welcome w:
                 _timeServer = $"{options.Orchestrator.Host}:{w.TimePort}";
+                _serverClock = w.ServerClock;
                 Volatile.Write(ref _reconnectGraceMs, w.ReconnectGraceMs);
-                _ = Task.Run(MeasureClock, stop);
+                _ = Task.Run(() => CheckClockAsync(stop), stop);
                 if (w.GameProfileJson is { } welcomeProfile &&
                     GameProfile.Parse(JsonNode.Parse(welcomeProfile)!.AsObject(), "orchestrator").Network is { } network)
                     PacketCaptureWanted?.Invoke(network);
@@ -463,6 +502,18 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
         }
         await SendAsync(new AgentState("recording", s.SessionId), stop);
         Log?.Invoke($"recording {s.SessionId} into {run.SessionDir}");
+        if (Clock is { } clock)
+        {
+            // Layer 1 evidence for player.json; the capture's Tidy moves it to raw/ with the other logs.
+            try
+            {
+                clock.Save(Path.Combine(run.SessionDir, ClockCheck.FileName));
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                Log?.Invoke($"cannot write {ClockCheck.FileName}: {e.Message}");
+            }
+        }
 
         var result = await run.Completion;
         if (etl is not null) await StopPacketsAsync(etl, result.SessionDir, stop);
@@ -565,25 +616,6 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
         {
             Log?.Invoke($"{files.SessionId}: cannot write the round's files: {e.Message}");
         }
-    }
-
-    private void MeasureClock()
-    {
-        var offsets = new List<double>();
-        for (int i = 0; i < 5; i++)
-        {
-            try
-            {
-                offsets.Add(SntpClient.Query(_timeServer!, NtpTimeout).SystemOffsetMs);
-            }
-            catch (Exception e) when (e is System.Net.Sockets.SocketException or InvalidDataException)
-            {
-                Log?.Invoke($"time service {_timeServer}: {e.Message}");
-            }
-        }
-        Log?.Invoke(offsets.Count > 0
-            ? $"clock: server - this machine = {offsets.Order().ElementAt(offsets.Count / 2):F1} ms ({offsets.Count}/5 samples)"
-            : $"clock: time service {_timeServer} does not answer; sessions will fail sync.clock");
     }
 
     private async Task SendAsync(AgentMessage message, CancellationToken stop)

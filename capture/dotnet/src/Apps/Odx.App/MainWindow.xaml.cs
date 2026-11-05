@@ -126,6 +126,7 @@ public partial class MainWindow : Window
         NameLabel.Content = _t.PlayerName;
         NameBox.ToolTip = _t.PlayerNameTooltip;
         RoomLabel.Content = _t.Room;
+        SyncClockButton.Content = _t.SyncClock;
         AudioBox.Content = _t.AudioOption;
         AudioBox.ToolTip = _t.AudioTooltip;
         ObsLabel.Content = _t.Video;
@@ -528,7 +529,8 @@ public partial class MainWindow : Window
             return;
         }
         var room = new RoomSession(new AgentOptions(orchestrator, _settings.PlayerId, _settings.PlayerName, PackageFolders.Captures,
-            _settings.WindowProcess, RoomCode: code, CreateRoom: code is null, AccessKey: _config.AccessKey, Lan: lan),
+            _settings.WindowProcess, RoomCode: code, CreateRoom: code is null, AccessKey: _config.AccessKey, Lan: lan,
+            TimeServer: _config.TimeServer),
             StartAgentCapture, _packets.GetAsync);
         var agent = room.Agent;
         agent.Countdown += (ms, cancelled) => Dispatcher.BeginInvoke(() => ShowAgentCountdown(ms, cancelled));
@@ -656,10 +658,28 @@ public partial class MainWindow : Window
         var lan = session.Lan;
         bool? packets = session.Packets;
         var round = _roundResult;
+        var clock = session.Agent.Clock;
+        bool clockOff = _config.TimeServer is not null && clock is { Ok: false, NtpError: null };
+        SyncClockButton.Visibility = clockOff && !_syncingClock ? Visibility.Visible : Visibility.Collapsed;
         SetStatus(t => t.RoomStatus(room.Code, host, members) + (round is null ? "" : "\n" + round(t)) +
+                       (_config.TimeServer is null ? "" : "\n" + (_syncingClock ? t.ClockSyncing : t.ClockLine(clock))) +
                        (lan is null ? "" : "\n" + t.LanStatus(lan)) +
                        (packets is { } on ? "\n" + (on ? t.PacketsOn : t.PacketsOff) : "") + "\n" + log + "\n" +
                        (host ? t.HostHint(hotkey) : ready ? t.ReadyOn(hotkey) : t.ReadyHint(hotkey)));
+    }
+
+    private bool _syncingClock;
+
+    /// <summary>Sets the Windows clock from NTP (UAC prompt), then measures again; the status line shows the outcome.</summary>
+    private async void SyncClock_Click(object sender, RoutedEventArgs e)
+    {
+        if (_room is not { } room || _config.TimeServer is not { } ntp || _syncingClock) return;
+        _syncingClock = true;
+        ShowAgentStatus();
+        await ClockSyncTool.RunElevatedAsync(ExternalTools.Odx(), ntp);
+        await room.CheckClockAsync();  // the clock line then shows whether it worked
+        _syncingClock = false;
+        ShowAgentStatus();
     }
 
     private async void ToggleReady()

@@ -90,6 +90,9 @@
             <Button x:Name="JoinButton" AutomationProperties.AutomationId="JoinButton" Click="Join_Click" />
             <Button x:Name="CreateButton" AutomationProperties.AutomationId="CreateButton" Click="Create_Click" />
             <CheckBox x:Name="LanBox" AutomationProperties.AutomationId="LanBox" Margin="8,0,0,6" VerticalAlignment="Center" />
+            <!-- Shown while the Windows clock is off NTP: runs odx clock-sync as administrator. -->
+            <Button x:Name="SyncClockButton" AutomationProperties.AutomationId="SyncClockButton" Visibility="Collapsed"
+                    Click="SyncClock_Click" />
         </StackPanel>
 
         <Label x:Name="HotkeyLabel" Grid.Row="8" />

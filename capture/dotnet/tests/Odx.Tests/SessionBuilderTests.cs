@@ -119,10 +119,10 @@ public class SessionBuilderTests
 
             var report = SessionBuilder.Build(dir, GameProfile.Load(WriteProfile(dir)));
 
-            Assert.Equal(new ClockSync("ntp", "ntp.test", 2, 25, 44_000), report.Clock);
+            Assert.Equal(new ClockSync("sntp", "ntp.test", 2, 25, 44_000), report.Clock);
             var session = JsonNode.Parse(File.ReadAllText(Path.Combine(dir, "session.json")))!;
             Assert.Equal("2026-10-04T10:00:44.000Z", session["created_at_utc"]!.GetValue<string>());
-            Assert.Equal("ntp", session["vendor_clock_sync"]!["source"]!.GetValue<string>());
+            Assert.Equal("sntp", session["vendor_clock_sync"]!["source"]!.GetValue<string>());
             var player = JsonNode.Parse(File.ReadAllText(Path.Combine(dir, PlayerFile.FileName)))!;
             Assert.Equal(44_000, (double)player["clock_sync"]!["offset_ms"]!);
             Assert.Equal(PlayerFile.OffsetDefinition, (string?)player["clock_sync"]!["offset_definition"]);

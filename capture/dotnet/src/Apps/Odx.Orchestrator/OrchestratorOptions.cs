@@ -18,4 +18,7 @@ public sealed record OrchestratorOptions(string GameProfilePath, int HttpPort = 
     /// <summary>ZeroTier controller API (and its token) for rooms with a virtual LAN; null: rooms have no LAN.</summary>
     public Uri? ZeroTierApi { get; init; }
     public string? ZeroTierToken { get; init; }
+    /// <summary>NTP server this machine's clock is measured against every minute (spec v3 §4 layer 1); null takes
+    /// time_server of odx-capture.json.</summary>
+    public string? TimeServer { get; init; }
 }

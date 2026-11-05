@@ -132,6 +132,10 @@ public sealed class Strings
     public required string ClockSystem { get; init; }
     public required Func<string, string> ConfigInvalid { get; init; }
     public required Func<double, string> ClockWarning { get; init; }
+    /// <summary>The room status line for the pre-round clock check (null: still measuring).</summary>
+    public required Func<ClockCheck?, string> ClockLine { get; init; }
+    public required string ClockSyncing { get; init; }
+    public required string SyncClock { get; init; }
 
     public static readonly Strings En = new()
     {
@@ -254,6 +258,14 @@ public sealed class Strings
         ClockSystem = "Clock: Windows clock only (NTP not measured — check time_server in odx-capture.json)",
         ConfigInvalid = error => $"Settings file not valid, the Windows clock is used: {error}",
         ClockWarning = offset => $"Warning: the Windows clock is {Math.Abs(offset) / 1000:F1} s off; fix Windows time sync.",
+        ClockLine = c => (c is null ? "Clock: measuring against NTP…"
+                : c.NtpOffsetMs is double o
+                    ? $"Clock: Windows clock {o:+0;-0} ms from NTP {c.NtpServer}" +
+                      (c.Ok ? " ✓" : $" — more than {ClockCheck.MaxOffsetMs} ms: press Sync clock before Ready")
+                    : $"Clock: NTP {c.NtpServer} did not answer ({c.NtpError}); check the internet connection") +
+            (c is { OrchestratorNtpOffsetMs: null } ? " · orchestrator: NTP not measured" : ""),
+        ClockSyncing = "Clock: setting the Windows clock from NTP (allow the administrator prompt)…",
+        SyncClock = "Sync clock",
     };
 
     public static readonly Strings Vi = new()
@@ -377,6 +389,14 @@ public sealed class Strings
         ClockSystem = "Đồng hồ: chỉ dùng đồng hồ Windows (chưa đo được NTP — kiểm tra time_server trong odx-capture.json)",
         ConfigInvalid = error => $"File cấu hình không hợp lệ, dùng đồng hồ Windows: {error}",
         ClockWarning = offset => $"Cảnh báo: đồng hồ Windows lệch {Math.Abs(offset) / 1000:F1} giây; hãy sửa đồng bộ giờ của Windows.",
+        ClockLine = c => (c is null ? "Đồng hồ: đang đo so với NTP…"
+                : c.NtpOffsetMs is double o
+                    ? $"Đồng hồ: đồng hồ Windows lệch {o:+0;-0} ms so với NTP {c.NtpServer}" +
+                      (c.Ok ? " ✓" : $" — quá {ClockCheck.MaxOffsetMs} ms: bấm Đồng bộ giờ trước khi Sẵn sàng")
+                    : $"Đồng hồ: NTP {c.NtpServer} không trả lời ({c.NtpError}); kiểm tra kết nối Internet") +
+            (c is { OrchestratorNtpOffsetMs: null } ? " · orchestrator: chưa đo NTP" : ""),
+        ClockSyncing = "Đồng hồ: đang đặt đồng hồ Windows theo NTP (hãy cho phép ở hộp thoại quản trị)…",
+        SyncClock = "Đồng bộ giờ",
     };
 
     /// <summary>Title and text of the Windows notification shown when a recording is finished.</summary>
