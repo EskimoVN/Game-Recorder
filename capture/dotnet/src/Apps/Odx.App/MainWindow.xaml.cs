@@ -41,6 +41,7 @@ public partial class MainWindow : Window
     private readonly AppSettings _settings = AppSettings.Load();
     private readonly CaptureConfig _config;
     private readonly DailyLogFile _log = new(PackageFolders.Logs);
+    private readonly bool _obsRows;
     private readonly DispatcherTimer _clock = new() { Interval = TimeSpan.FromSeconds(1) };
     private readonly Forms.NotifyIcon _tray = new();
     private readonly Forms.ToolStripMenuItem _trayStartStop = new(), _trayShow = new(), _trayExit = new();
@@ -74,6 +75,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        _obsRows = _settings.RecordWithObs;
         _t = Strings.For(_settings.Language ?? Strings.DefaultLanguage);
         string? configError = null;
         try
@@ -142,8 +144,6 @@ public partial class MainWindow : Window
         ObsAddressLabel.Text = _t.ObsAddress;
         ObsPasswordLabel.Text = _t.ObsPassword;
         ObsTestButton.ToolTip = _t.ObsTestTooltip;
-        LanBox.Content = _t.LanOption;
-        LanBox.ToolTip = _t.LanTooltip;
         RoomBox.ToolTip = _t.RoomTooltip;
         RefreshButton.Content = _t.Refresh;
         GameBox.ToolTip = _t.GameTooltip;
@@ -364,6 +364,8 @@ public partial class MainWindow : Window
         bool obs = ObsBox.IsChecked == true;
         FpsBox.IsEnabled = AudioBox.IsEnabled = idle && !obs;
         ObsAddressBox.IsEnabled = ObsPasswordBox.IsEnabled = ObsTestButton.IsEnabled = idle;
+        // OBS is an expert option: its rows show only when it was already on in the saved settings (odx-app.json).
+        ObsLabel.Visibility = ObsBox.Visibility = _obsRows ? Visibility.Visible : Visibility.Collapsed;
         ObsConnectionLabel.Visibility = ObsConnectionPanel.Visibility = ObsTestButton.Visibility =
             obs ? Visibility.Visible : Visibility.Collapsed;
         LanguageBox.IsEnabled = PlayerBox.IsEnabled = NameBox.IsEnabled = idle;
@@ -376,7 +378,8 @@ public partial class MainWindow : Window
         CreateButton.Content = inRoom ? _t.CloseRoom : _t.CreateRoom;
         CreateButton.IsEnabled = idle || inRoom && _agent!.IsHost;
         CreateButton.Visibility = inRoom && !_agent!.IsHost ? Visibility.Collapsed : Visibility.Visible;
-        LanBox.Visibility = idle ? Visibility.Visible : Visibility.Collapsed;
+        // In a room the orchestrator's game profile and frame rate apply.
+        GameLabel.Visibility = GameBox.Visibility = FpsLabel.Visibility = FpsBox.Visibility = inRoom ? Visibility.Collapsed : Visibility.Visible;
         RefreshButton.IsEnabled = idle;
         _tray.Text = idle ? "Odx Capture" : _t.TrayTooltip(_trayStartStop.Text);
     }
@@ -527,7 +530,7 @@ public partial class MainWindow : Window
     private void Create_Click(object sender, RoutedEventArgs e)
     {
         if (_state == RunState.Agent) CloseRoom();
-        else EnterRoom(null, LanBox.IsChecked == true);
+        else EnterRoom(null);
     }
 
     /// <param name="code">Invite code to join; null opens a new room with this player as its host.</param>

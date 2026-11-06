@@ -14,7 +14,7 @@ public sealed class AppSettings
     /// <summary>Process name passed to odx record --window; null records the primary monitor.</summary>
     public string? WindowProcess { get; set; }
     public int Fps { get; set; } = 30;
-    public bool RecordAudio { get; set; }
+    public bool RecordAudio { get; set; } = true;
     public bool RecordWithObs { get; set; }
     public string ObsAddress { get; set; } = "127.0.0.1:4455";
     /// <summary>OBS's WebSocket password, kept in clear like OBS keeps it in its own settings.</summary>

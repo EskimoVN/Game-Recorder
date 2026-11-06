@@ -46,7 +46,6 @@ public sealed class Strings
     public required string CreateRoom { get; init; }
     public required string LeaveRoom { get; init; }
     public required string CloseRoom { get; init; }
-    public required string LanOption { get; init; }
     public required string AudioOption { get; init; }
     public required string AudioTooltip { get; init; }
     public required string Video { get; init; }
@@ -63,7 +62,6 @@ public sealed class Strings
     public required Func<ObsCheck, string> ObsConnected { get; init; }
     public required Func<string, string> ObsTestFailed { get; init; }
     public required string ObsNoAnswer { get; init; }
-    public required string LanTooltip { get; init; }
     public required Func<LanState, string> LanStatus { get; init; }
     public required string LanInstallTitle { get; init; }
     public required string LanInstallQuestion { get; init; }
@@ -186,8 +184,6 @@ public sealed class Strings
             (c.Recording ? ". OBS is recording now: stop it before you start" : ""),
         ObsTestFailed = error => $"OBS not reachable: {error}. Open OBS and turn on Tools > WebSocket Server Settings > Enable WebSocket server",
         ObsNoAnswer = "no answer within 5 s",
-        LanOption = "LAN (ZeroTier)",
-        LanTooltip = "Create the room with a virtual LAN, for games that only play over LAN (e.g. Warcraft III): everyone in the room is on one LAN",
         LanStatus = lan => lan.Status switch
         {
             "ok" => $"LAN: {lan.Address} (in-game, host or join through LAN)",
@@ -332,8 +328,6 @@ public sealed class Strings
             (c.Recording ? ". OBS đang ghi: hãy dừng trước khi bắt đầu" : ""),
         ObsTestFailed = error => $"Không kết nối được OBS: {error}. Mở OBS và bật Tools > WebSocket Server Settings > Enable WebSocket server",
         ObsNoAnswer = "không có phản hồi sau 5 giây",
-        LanOption = "LAN (ZeroTier)",
-        LanTooltip = "Tạo room có mạng LAN ảo, cho game chỉ chơi được qua LAN (vd. Warcraft III): mọi người trong room chung một mạng LAN",
         LanStatus = lan => lan.Status switch
         {
             "ok" => $"LAN: {lan.Address} (trong game tạo/vào trận qua LAN)",
