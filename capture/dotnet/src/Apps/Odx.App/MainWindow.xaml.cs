@@ -538,7 +538,7 @@ public partial class MainWindow : Window
         var room = new RoomSession(new AgentOptions(orchestrator, _settings.PlayerId, _settings.PlayerName, PackageFolders.Captures,
             _settings.WindowProcess, RoomCode: code, CreateRoom: code is null, AccessKey: _config.AccessKey, Lan: lan,
             TimeServer: _config.TimeServer),
-            StartAgentCapture, _packets.GetAsync, _log);
+            StartAgentCapture, _packets.GetAsync, _log, _settings.RecordAudio && !_settings.RecordWithObs);
         var agent = room.Agent;
         agent.Countdown += (ms, cancelled) => Dispatcher.BeginInvoke(() => ShowAgentCountdown(ms, cancelled));
         room.Changed += () => Dispatcher.BeginInvoke(() =>
@@ -672,7 +672,8 @@ public partial class MainWindow : Window
         SyncClockButton.Visibility = clockOff && !_syncingClock ? Visibility.Visible : Visibility.Collapsed;
         SetStatus(t => t.RoomStatus(room.Code, host, members) + (round is null ? "" : "\n" + round(t)) +
                        (_config.TimeServer is null ? "" : "\n" + (_syncingClock ? t.ClockSyncing : t.ClockLine(clock))) +
-                       (session.Agent.Capture is { } capture ? "\n" + t.CaptureLine(capture) : "") +
+                       (session.Agent.Capture is { } capture ? "\n" + t.CaptureLine(capture) +
+                                                               (capture.Audio is { } audio ? "\n" + t.AudioLine(audio) : "") : "") +
                        (lan is null ? "" : "\n" + t.LanStatus(lan)) +
                        (packets is { } on ? "\n" + (on ? t.PacketsOn : t.PacketsOff) : "") + "\n" + log + "\n" +
                        (host ? t.HostHint(hotkey) : ready ? t.ReadyOn(hotkey) : t.ReadyHint(hotkey)));

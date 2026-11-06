@@ -16,8 +16,10 @@ public sealed class RoomSession : IDisposable
     private readonly Func<Task<IPacketCapture?>> _packets;
 
     /// <param name="packets">Gives the packet capture when the room's game wants one; null when it cannot be had.</param>
+    /// <param name="recordAudio">Rounds are recorded with sound (<paramref name="startCapture"/> asks for it), so the capture
+    /// probe tells where it would come from.</param>
     public RoomSession(AgentOptions options, Func<CaptureOptions, ICaptureRun> startCapture, Func<Task<IPacketCapture?>> packets,
-        DailyLogFile? log = null)
+        DailyLogFile? log = null, bool recordAudio = false)
     {
         _packets = packets;
         Agent = new AgentClient(options, startCapture);
@@ -40,7 +42,7 @@ public sealed class RoomSession : IDisposable
         };
         Agent.PacketCaptureWanted += wanted => _ = WantPacketsAsync();
         Agent.ClockChecked += _ => Changed?.Invoke();
-        Agent.ProbeCapture = CaptureRun.ProbeAsync;
+        Agent.ProbeCapture = (window, game) => CaptureRun.ProbeAsync(window, game, recordAudio);
         Agent.CaptureProbed += _ => Changed?.Invoke();
     }
 

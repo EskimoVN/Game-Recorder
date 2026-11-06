@@ -30,6 +30,10 @@ internal sealed class AudioLoopback : IDisposable
     /// <summary>A packet whose capture time is this far from now is not on the QPC clock.</summary>
     private const double MaxQpcSkewMs = 1000;
     private const long BufferHns = 20_000_000;  // 2 s of WASAPI buffer (a hint; a stalled capture thread then loses less)
+    // Process loopback is documented from build 20348 (Windows 11 / Server 2022) but works from Windows 10 2004 (19041),
+    // the build OBS's and GStreamer's process capture require; gating on 20348 sent every Windows 10 PC to the device
+    // fallback, voice chat included (test of 2026-11-06).
+    private const int ProcessLoopbackMinBuild = 19041;
     private const int QueuedChunks = 4096;        // ~40 s of 10 ms packets, or 4096 s of 1 s silence chunks
     private const double SilentDbfs = -60;
 
@@ -61,11 +65,11 @@ internal sealed class AudioLoopback : IDisposable
     public string? Error { get; private set; }
 
     /// <param name="processId">The game's process; processes it starts are included.</param>
-    /// <exception cref="NotSupportedException">Windows is older than build 20348, which added process loopback.</exception>
+    /// <exception cref="NotSupportedException">Windows is older than 10 2004 (build 19041), which added process loopback.</exception>
     public AudioLoopback(int processId)
     {
-        if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 20348))
-            throw new NotSupportedException("recording only the game's audio needs Windows 11 (or Windows 10 build 20348+)");
+        if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, ProcessLoopbackMinBuild))
+            throw new NotSupportedException("recording only the game's audio needs Windows 10 2004 (build 19041) or newer");
         ProcessId = processId;
         _client = ProcessLoopback.Activate(processId);
         // A process loopback client has no mix format: Windows converts the game's audio to the one asked for.

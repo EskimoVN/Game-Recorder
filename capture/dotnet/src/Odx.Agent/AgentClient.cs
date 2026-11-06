@@ -281,6 +281,8 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
         Log?.Invoke(result is null ? "capture probe: could not run odx record"
             : result.Ok ? $"capture probe: {result.Source} {result.Width}x{result.Height}{(result.WindowStyle is { } style ? $" ({style})" : "")} ok"
             : result.Frames == 0 ? $"capture probe: {result.Source} gives no frames" : $"capture probe: {result.Source} is black");
+        if (result?.Audio is { } audio)
+            Log?.Invoke($"audio probe: {audio.Source}{(audio.FallbackReason is { } f ? $" ({f})" : "")}{(audio.Error is { } e ? $": {e}" : "")}");
         CaptureProbed?.Invoke(result);
         return result;
     }

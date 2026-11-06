@@ -57,4 +57,15 @@ public class CaptureProbeTests
         Assert.False((probe with { Frames = 0, Black = false }).Ok);
         Assert.Null(CaptureProbe.TryParse("recording 1920x1080"));
     }
+
+    [Fact]
+    public void Says_where_the_sound_would_come_from()
+    {
+        var fallback = new AudioStatus(AudioStatus.FromDevice, null, "Speakers", "recording only the game's audio needs Windows 10 2004 (build 19041) or newer");
+        var probe = new CaptureProbe(1920, 1080, 10, false, 97.3, "borderless", "window:ArmaReforgerSteam", fallback);
+        Assert.True(probe.Ok);
+        Assert.Contains("\"audio\":{\"source\":\"device\"", probe.ToJson());
+        Assert.Equal(probe, CaptureProbe.TryParse(probe.ToJson()));
+        Assert.Null(CaptureProbe.TryParse((probe with { Audio = null }).ToJson())!.Audio);
+    }
 }

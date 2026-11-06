@@ -134,9 +134,10 @@ public sealed class CaptureRun : ICaptureRun
 
     /// <summary>
     /// <c>odx record --probe</c> on the source a round would record: the window of <paramref name="windowProcess"/>, else
-    /// the monitor of <paramref name="gameProcess"/>'s window (the primary without one). Null when odx could not run.
+    /// the monitor of <paramref name="gameProcess"/>'s window (the primary without one), and with <paramref name="audio"/>
+    /// the sound as a recording would take it. Null when odx could not run.
     /// </summary>
-    public static async Task<CaptureProbe?> ProbeAsync(string? windowProcess, string? gameProcess)
+    public static async Task<CaptureProbe?> ProbeAsync(string? windowProcess, string? gameProcess, bool audio = false)
     {
         var psi = new ProcessStartInfo(ExternalTools.Odx())
         {
@@ -144,6 +145,7 @@ public sealed class CaptureRun : ICaptureRun
         };
         var args = new List<string> { "record", "--probe", "--out", Path.Combine(Path.GetTempPath(), "odx-probe") };
         args.AddRange(windowProcess is string p ? ["--window", p] : ["--monitor"]);
+        if (audio) args.Add("--audio");
         if (windowProcess is null && gameProcess is string g) args.AddRange(["--audio-process", g]);
         foreach (string a in args) psi.ArgumentList.Add(a);
         try

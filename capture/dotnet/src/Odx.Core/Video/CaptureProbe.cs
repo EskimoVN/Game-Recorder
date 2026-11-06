@@ -12,7 +12,10 @@ namespace Odx.Core;
 /// <param name="WindowStyle">"windowed" (title bar), "borderless" (no frame, fills its monitor), "popup" (no frame, smaller);
 /// null for a monitor source.</param>
 /// <param name="Source">"window:&lt;process&gt;", "monitor:&lt;process&gt;" (the monitor the game's window is on) or "monitor:primary".</param>
-public sealed record CaptureProbe(int Width, int Height, int Frames, bool Black, double LumaMean, string? WindowStyle, string Source)
+/// <param name="Audio">With --audio: where a recording's sound would come from (the game's own, the whole playback device
+/// with the reason, or none with the error); null without.</param>
+public sealed record CaptureProbe(int Width, int Height, int Frames, bool Black, double LumaMean, string? WindowStyle, string Source,
+    AudioStatus? Audio = null)
 {
     /// <summary>The source can be recorded: it gives frames and they are not all black.</summary>
     public bool Ok => Frames > 0 && !Black;

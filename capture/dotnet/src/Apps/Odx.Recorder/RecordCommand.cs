@@ -173,7 +173,7 @@ public static class RecordCommand
                     Console.Error.WriteLine($"audio not recorded: {e.Message}");
                 }
             }
-            audio?.Start();
+            if (!opts.Probe) audio?.Start();  // a probe only asks where the sound would come from
         }
         AudioStatus? AudioNow() => !opts.Audio ? null : audio?.Status(audioFallback) ?? new AudioStatus(AudioStatus.NotRecorded, Error: audioError);
 
@@ -280,7 +280,8 @@ public static class RecordCommand
             converter?.Dispose();
             Console.WriteLine(new CaptureProbe(width, height, probeFrames, probeFrames > 0 && probeBlack,
                 probeFrames > 0 ? Math.Round(probeLuma / probeFrames, 1) : 0,
-                window == IntPtr.Zero ? null : CaptureInterop.WindowStyle(window, monitor), source).ToJson());
+                window == IntPtr.Zero ? null : CaptureInterop.WindowStyle(window, monitor), source, AudioNow()).ToJson());
+            audio?.Dispose();
             return 0;
         }
         if (opts.JsonStatus)
