@@ -102,8 +102,9 @@ public sealed class RoomSession : IDisposable
 
     public Task ToggleReadyAsync() => Quietly(() => Agent.SetReadyAsync(!Agent.IsReady, _stop.Token));
 
+    /// <param name="sessionId">The host's name for the round (its folder); null lets the orchestrator name it.</param>
     /// <exception cref="System.Net.WebSockets.WebSocketException">Not connected.</exception>
-    public Task ToggleRoundAsync(int countdownMs) => Agent.ToggleRoundAsync(countdownMs, _stop.Token);
+    public Task ToggleRoundAsync(int countdownMs, string? sessionId = null) => Agent.ToggleRoundAsync(countdownMs, _stop.Token, sessionId);
 
     public Task JoinLanAsync() => Agent.JoinLanAsync(_stop.Token);
 

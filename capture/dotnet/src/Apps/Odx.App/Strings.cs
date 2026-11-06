@@ -105,6 +105,9 @@ public sealed class Strings
     public required Func<string, string> StartRound { get; init; }
     public required Func<int, int, string> WaitingReady { get; init; }
     public required Func<int, string> WaitingSaving { get; init; }
+    public required string TaskId { get; init; }
+    public required string TaskIdTooltip { get; init; }
+    public required string TaskIdRequired { get; init; }
     public required Func<string, string> EndRound { get; init; }
     public required Func<string, string> ReadyButton { get; init; }
     public required Func<string, string> UnreadyButton { get; init; }
@@ -235,6 +238,9 @@ public sealed class Strings
         StartRound = hotkey => $"Start round ({hotkey})",
         WaitingReady = (ready, others) => $"Waiting for players to be ready ({ready}/{others})",
         WaitingSaving = saving => $"Waiting for {saving} player(s) to save the last round…",
+        TaskId = "Task ID",
+        TaskIdTooltip = "The round's name: every player's recording and the delivered session go into a folder of this name (letters, digits, _ . -; one per round)",
+        TaskIdRequired = "Enter the task ID (the round's folder name: letters, digits, _ . -) before starting the round",
         EndRound = hotkey => $"End round ({hotkey})",
         ReadyButton = hotkey => $"I'm ready ({hotkey})",
         UnreadyButton = hotkey => $"Not ready ({hotkey})",
@@ -378,6 +384,9 @@ public sealed class Strings
         StartRound = hotkey => $"Bắt đầu round ({hotkey})",
         WaitingReady = (ready, others) => $"Chờ mọi người sẵn sàng ({ready}/{others})",
         WaitingSaving = saving => $"Chờ {saving} người lưu xong round trước…",
+        TaskId = "Task ID",
+        TaskIdTooltip = "Tên round: bản ghi của mọi người chơi và session giao đều nằm trong thư mục mang tên này (chữ, số, _ . -; mỗi round một tên)",
+        TaskIdRequired = "Nhập Task ID (tên thư mục của round: chữ, số, _ . -) rồi mới bắt đầu round",
         EndRound = hotkey => $"Kết thúc round ({hotkey})",
         ReadyButton = hotkey => $"Tôi sẵn sàng ({hotkey})",
         UnreadyButton = hotkey => $"Hủy sẵn sàng ({hotkey})",

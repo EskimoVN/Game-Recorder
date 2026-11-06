@@ -132,6 +132,10 @@ public sealed partial class MatchCoordinator
     private static List<AgentLink> NotReady(Room room) =>
         room.Members.Where(a => !room.IsHost(a) && !(a.Ready && a.State is "idle" or "armed")).ToList();
 
+    /// <summary>A round of any room, open, finished or stored, already has this session id (two sessions cannot share a folder).</summary>
+    private bool SessionIdUsed(string sid) =>
+        _rounds.ContainsKey(sid) || _rooms.Values.Any(r => r.Recorded.Any(x => x.SessionId == sid)) || Store?.Round(sid) is not null;
+
     /// <summary>Members, the host included, whose capture of the last round is not done: a new round would leave them out.</summary>
     private static List<AgentLink> Saving(Room room) => room.Members.Where(a => a.State is "starting" or "recording").ToList();
 

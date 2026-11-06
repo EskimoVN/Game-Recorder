@@ -94,9 +94,15 @@ public sealed partial class MatchCoordinator(OrchestratorOptions options, int ti
             case ToggleRound when room is not null && room.IsHost(link) && room.Current is null && NotReady(room) is { Count: > 0 } waiting:
                 effects.Sends.Add((link, new RoomError($"not ready yet: {string.Join(", ", waiting.Select(a => a.Hello.Name))}")));
                 break;
+            case ToggleRound { SessionId: { } sid } when room is not null && room.IsHost(link) && room.Current is null && !ToggleRound.IsValidSessionId(sid):
+                effects.Sends.Add((link, new RoomError($"task id '{sid}': letters, digits, _ . - only, 64 at most")));
+                break;
+            case ToggleRound { SessionId: { } sid } when room is not null && room.IsHost(link) && room.Current is null && SessionIdUsed(sid):
+                effects.Sends.Add((link, new RoomError($"task id '{sid}' was already used")));
+                break;
             case ToggleRound t when room is not null && room.IsHost(link):
                 Apply(room, room.Current is null
-                    ? new JsonObject { ["type"] = GameEvents.RoundStart, ["countdown_ms"] = t.CountdownMs, ["by"] = link.Id }
+                    ? new JsonObject { ["type"] = GameEvents.RoundStart, ["countdown_ms"] = t.CountdownMs, ["by"] = link.Id, ["session_id"] = t.SessionId }
                     : new JsonObject { ["type"] = GameEvents.RoundEnd, ["by"] = link.Id }, effects);
                 break;
             case CloseRoom or ToggleRound:

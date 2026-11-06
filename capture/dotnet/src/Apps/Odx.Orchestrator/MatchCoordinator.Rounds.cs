@@ -74,11 +74,14 @@ public sealed partial class MatchCoordinator
         log.LogInformation("room {Room}: match {Match}, {Game} {Map}", room.Code, room.MatchId, room.Game, room.Map);
     }
 
-    /// <summary>With a countdown, <paramref name="e"/> becomes round_countdown and round_start follows when play starts.</summary>
+    /// <summary>
+    /// With a countdown, <paramref name="e"/> becomes round_countdown and round_start follows when play starts. The session
+    /// is named by the host (<see cref="ToggleRound.SessionId"/>, already checked), else <c>&lt;match&gt;-rNN</c>.
+    /// </summary>
     private void StartRound(Room room, JsonObject e, double utc, Effects effects)
     {
         room.RoundNumber = e["round"]?.GetValue<int>() ?? room.RoundNumber + 1;
-        string sid = $"{room.MatchId}-r{room.RoundNumber:D2}";
+        string sid = GameEvents.Text(e, "session_id") ?? $"{room.MatchId}-r{room.RoundNumber:D2}";
         var players = room.Members.Where(a => a.State is "idle" or "armed").ToList();
         foreach (var busy in room.Members.Except(players))
             log.LogWarning("{Player} is {State}, left out of {Session}", busy.Id, busy.State, sid);

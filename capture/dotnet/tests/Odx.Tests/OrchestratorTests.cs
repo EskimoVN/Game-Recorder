@@ -591,6 +591,37 @@ public sealed class OrchestratorTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task TheHostNamesTheRoundAndEveryPlayersFolderTakesThatName()
+    {
+        string template = SessionFixtures.MakeValidSession(Path.Combine(_root, "template"));
+        var (host, _, code) = await HostRoom("p1");
+        var (member, memberStarted) = Connect(template, "p2", code);
+        await WaitForAgents(2, code);
+        var refused = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        host.RoomError += m => refused.TrySetResult(m);
+        var kept = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        member.RoundKept += (sid, result) => kept.TrySetResult(result.SessionDir);
+
+        await member.SetReadyAsync(true, default);
+        for (int i = 0; i < 100 && !host.Room!.Members.All(m => m.PlayerId == "p1" || m.Ready); i++) await Task.Delay(50);
+        await host.ToggleRoundAsync(0, default, "task 42");
+        Assert.Contains("task id 'task 42'", await refused.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+        await host.ToggleRoundAsync(0, default, "task-42");
+        await memberStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal("task-42", (string?)(await RoomStatus(code))["current_session"]);
+        await host.ToggleRoundAsync(0, default);
+        Assert.Equal("task-42", Path.GetFileName(await kept.Task.WaitAsync(TimeSpan.FromSeconds(10))));
+
+        refused = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        for (int i = 0; i < 100 && host.Room!.Members.Any(m => m.State != "idle"); i++) await Task.Delay(50);
+        await member.SetReadyAsync(true, default);
+        for (int i = 0; i < 100 && !host.Room!.Members.All(m => m.PlayerId == "p1" || m.Ready); i++) await Task.Delay(50);
+        await host.ToggleRoundAsync(0, default, "task-42");
+        Assert.Contains("already used", await refused.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Null((await RoomStatus(code))["current_session"]);
+    }
+
+    [Fact]
     public async Task AHostCannotStartARoundWhileSomeoneStillSavesTheLastOne()
     {
         string template = SessionFixtures.MakeValidSession(Path.Combine(_root, "template"));

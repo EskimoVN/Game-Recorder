@@ -308,7 +308,9 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
     /// Host control (in place of a game server plugin): starts a round, with a countdown on every member, when none is
     /// running, otherwise ends it.
     /// </summary>
-    public Task ToggleRoundAsync(int countdownMs, CancellationToken stop) => SendAsync(new ToggleRound(countdownMs), stop);
+    /// <param name="sessionId">The host's name for the round (its folder); null lets the orchestrator name it.</param>
+    public Task ToggleRoundAsync(int countdownMs, CancellationToken stop, string? sessionId = null) =>
+        SendAsync(new ToggleRound(countdownMs, sessionId), stop);
 
     public async Task LeaveRoomAsync(CancellationToken stop)
     {

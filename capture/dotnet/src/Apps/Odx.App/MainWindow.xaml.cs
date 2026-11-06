@@ -127,6 +127,8 @@ public partial class MainWindow : Window
         NameLabel.Content = _t.PlayerName;
         NameBox.ToolTip = _t.PlayerNameTooltip;
         RoomLabel.Content = _t.Room;
+        TaskLabel.Text = _t.TaskId;
+        TaskBox.ToolTip = _t.TaskIdTooltip;
         SyncClockButton.Content = _t.SyncClock;
         AudioBox.Content = _t.AudioOption;
         AudioBox.ToolTip = _t.AudioTooltip;
@@ -367,6 +369,8 @@ public partial class MainWindow : Window
         LanguageBox.IsEnabled = PlayerBox.IsEnabled = NameBox.IsEnabled = idle;
         bool inRoom = state == RunState.Agent && _agent?.Room is not null;
         RoomBox.Visibility = inRoom ? Visibility.Visible : Visibility.Collapsed;
+        TaskLabel.Visibility = TaskBox.Visibility = inRoom && _agent!.IsHost ? Visibility.Visible : Visibility.Collapsed;
+        TaskBox.IsEnabled = inRoom && _agent?.Room is { CurrentSession: null };
         JoinButton.Content = inRoom ? _t.LeaveRoom : _t.JoinRoom;
         JoinButton.IsEnabled = idle || inRoom;
         CreateButton.Content = inRoom ? _t.CloseRoom : _t.CreateRoom;
@@ -703,9 +707,19 @@ public partial class MainWindow : Window
     private async void ToggleRound()
     {
         if (_room is not { } room) return;
+        string? task = null;
+        if (room.Agent.Room is { CurrentSession: null })
+        {
+            task = TaskBox.Text.Trim();
+            if (!Odx.Protocol.ToggleRound.IsValidSessionId(task))
+            {
+                SetStatus(t => t.TaskIdRequired);
+                return;
+            }
+        }
         try
         {
-            await room.ToggleRoundAsync(CountdownSeconds * 1000);
+            await room.ToggleRoundAsync(CountdownSeconds * 1000, task);
         }
         catch (Exception e) when (e is System.Net.WebSockets.WebSocketException or OperationCanceledException)
         {

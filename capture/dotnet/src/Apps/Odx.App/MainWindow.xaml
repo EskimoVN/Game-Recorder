@@ -87,6 +87,10 @@
             <TextBox x:Name="RoomBox" AutomationProperties.AutomationId="RoomBox" Width="110" IsReadOnly="True"
                      Visibility="Collapsed" FontFamily="Consolas" FontSize="14" FontWeight="SemiBold"
                      VerticalContentAlignment="Center" HorizontalContentAlignment="Center" />
+            <!-- The host names each round (the folder every player's capture and the delivered session get). -->
+            <TextBlock x:Name="TaskLabel" Visibility="Collapsed" VerticalAlignment="Center" Margin="12,0,4,0" />
+            <TextBox x:Name="TaskBox" AutomationProperties.AutomationId="TaskBox" Width="150" Visibility="Collapsed"
+                     VerticalContentAlignment="Center" Margin="0,0,12,0" />
             <Button x:Name="JoinButton" AutomationProperties.AutomationId="JoinButton" Click="Join_Click" />
             <Button x:Name="CreateButton" AutomationProperties.AutomationId="CreateButton" Click="Create_Click" />
             <CheckBox x:Name="LanBox" AutomationProperties.AutomationId="LanBox" Margin="8,0,0,6" VerticalAlignment="Center" />

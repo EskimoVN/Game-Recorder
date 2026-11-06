@@ -59,7 +59,7 @@ public static class GameEvents
 public abstract record AgentMessage
 {
     /// <summary>Raised whenever a message changes in a way the other side cannot read; sent in <see cref="Hello"/>.</summary>
-    public const int Version = 2;
+    public const int Version = 3;
 
     public static readonly JsonSerializerOptions Json = new()
     {
@@ -179,7 +179,13 @@ public sealed record LeaveRoom : AgentMessage;
 public sealed record CloseRoom : AgentMessage;
 
 /// <summary>Agent → orchestrator, host only: start a round (with this countdown) when none runs, otherwise end it.</summary>
-public sealed record ToggleRound(int CountdownMs) : AgentMessage;
+/// <param name="SessionId">The round's session id, typed by the host: the name of every player's capture folder and of the
+/// delivered session; null lets the orchestrator name it <c>&lt;match&gt;-rNN</c>.</param>
+public sealed record ToggleRound(int CountdownMs, string? SessionId = null) : AgentMessage
+{
+    /// <summary>A session id is a folder name: letters, digits, <c>_ . -</c>, 64 characters at most, not starting with a dot or dash.</summary>
+    public static bool IsValidSessionId(string id) => System.Text.RegularExpressions.Regex.IsMatch(id, "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$");
+}
 
 public sealed record RoomMember(string PlayerId, string Name, bool Ready, string State);
 
