@@ -42,6 +42,8 @@ public static class RecordCommand
     private static readonly TimeSpan RentWait = TimeSpan.FromMilliseconds(100);
     private static readonly TimeSpan DrainTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan FfmpegExitTimeout = TimeSpan.FromSeconds(20);
+    /// <summary>After the stop signal: past the limits above, a step that never returns ends the process (see the watchdog).</summary>
+    private static readonly TimeSpan StopWatchdog = TimeSpan.FromSeconds(40);
 
     public static int Run(string[] args)
     {
@@ -107,7 +109,8 @@ public static class RecordCommand
         try { session.IsBorderRequired = false; } catch (Exception) { /* not available before Windows 11 */ }
 
         FfmpegEncoder? encoder = null;
-        using var frameLog = new VideoFrameLogWriter(new StreamWriter(Path.Combine(opts.OutDir, "video_frames.csv")));
+        // Flushed per row (30 small writes a second): a recorder killed mid-way leaves every frame's row, not a 4 KB buffer short.
+        using var frameLog = new VideoFrameLogWriter(new StreamWriter(Path.Combine(opts.OutDir, "video_frames.csv")) { AutoFlush = true });
         var resampler = new GridResampler(opts.Fps);
 
         var gate = new object();
@@ -304,39 +307,13 @@ public static class RecordCommand
         }
 
         double stopQpcMs = QpcClock.NowMs();
+        var stopClock = Stopwatch.StartNew();
         var phase = Stopwatch.StartNew();
-        lock (gate)
-        {
-            encoder ??= StartEncoder();
-            if (!stopped)
-            {
-                stopped = true;
-                ShowPending();
-                Emit(resampler.Finish(stopQpcMs), null);
-            }
-        }
-        writer!.Complete(DrainTimeout);
-        error ??= writer.Error;
-        long framesWritten = writer.Written;
-        long drainMs = phase.ElapsedMilliseconds;
-        frameLog.Flush();
-        session.Dispose();
-        framePool.Dispose();
-        phase.Restart();
-        encoder.EndVideo();  // ffmpeg flushes the encoder while the audio file is padded and closed
-        audio?.Finish(stopQpcMs);
-        if (audio?.Error is { } audioProblem) Console.Error.WriteLine($"audio: {audioProblem}");
-        long audioMs = phase.ElapsedMilliseconds;
-        var audioStatus = AudioNow();
-        phase.Restart();
-        int ffmpegExit = encoder.Finish(FfmpegExitTimeout);
-        var stopTiming = new StopTiming(drainMs, audioMs, phase.ElapsedMilliseconds, FfmpegKilled: ffmpegExit == -1);
-        if (ffmpegExit == -1) error ??= $"ffmpeg did not exit after the end of its input (encoder {encoder.Encoder}); killed, the video keeps the fragments written before";
-        encoder.Dispose();
-        audio?.Dispose();
-        converter?.Dispose();
+        string[] stopStep = ["last frames"];
+        bool[] drained = [false];
+        void Step(string name) => Volatile.Write(ref stopStep[0], name);
 
-        var meta = new Dictionary<string, object?>
+        Dictionary<string, object?> Meta(long frames, int? ffmpegExit, StopTiming? stopTiming, string? problem, AudioStatus? audioStatus) => new()
         {
             ["capture_id"] = Guid.NewGuid().ToString("N"),
             ["tool_version"] = BuildInfo.Version,
@@ -351,15 +328,15 @@ public static class RecordCommand
             ["started_utc"] = startUtc.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
             ["started_qpc_ms"] = startQpcMs,
             ["stopped_qpc_ms"] = stopQpcMs,
-            ["frames"] = framesWritten,
+            ["frames"] = frames,
             ["duplicate_frames"] = resampler.Duplicates,
             ["dropped_source_frames"] = resampler.DroppedSourceFrames,
             ["size_changed_frames"] = sizeChangedFrames,
             ["starved_frames"] = starvedFrames,
             ["first_frame_capture_latency_ms"] = firstFrameLatencyMs,
             ["ffmpeg_exit_code"] = ffmpegExit,
-            ["stop"] = stopTiming.ToNode(),
-            ["error"] = error,
+            ["stop"] = stopTiming?.ToNode(),
+            ["error"] = problem,
             ["audio"] = audioStatus is null ? null : new Dictionary<string, object?>
             {
                 ["sample_rate"] = audio?.Input.SampleRate,
@@ -368,13 +345,87 @@ public static class RecordCommand
                 ["status"] = audioStatus.ToNode(),
             },
         };
-        void WriteRecordingJson() => File.WriteAllText(Path.Combine(opts.OutDir, "recording.json"),
+        void WriteRecordingJson(Dictionary<string, object?> meta) => File.WriteAllText(Path.Combine(opts.OutDir, "recording.json"),
             JsonSerializer.Serialize(meta, new JsonSerializerOptions
             {
                 WriteIndented = true,
                 Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
             }));
-        WriteRecordingJson();
+
+        // Watchdog: the limits below add up to ~31 s, but a Windows call on the stop path can simply never return (WGC,
+        // D3D or WASAPI teardown on the host PCs of 2026-11-06/07; which one, this names). Then the recording is ended
+        // with what is on disk: recording.json and the stopped status say where it stuck, this process exits, ffmpeg
+        // (a child with its own stdin pipe) sees the end of its input and finishes video_raw.mp4, and the capture host
+        // finalizes it. The exit code is 0 when every frame had reached ffmpeg (the hang was in teardown).
+        using var watchdog = new Timer(_ =>
+        {
+            string where = Volatile.Read(ref stopStep[0]);
+            bool complete = Volatile.Read(ref drained[0]);
+            long frames = writer?.Written ?? 0;
+            string problem = $"stop stuck in '{where}' after {stopClock.Elapsed.TotalSeconds:0} s; ended with what is on disk" +
+                             (complete ? "" : " (frames may be missing)");
+            Console.Error.WriteLine(problem);
+            try
+            {
+                WriteRecordingJson(Meta(frames, null, null, problem, AudioNow()));
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                Console.Error.WriteLine($"recording.json: {e.Message}");
+            }
+            if (opts.JsonStatus)
+                Console.WriteLine(new RecorderStatus(RecorderStatus.Stopped, frames, resampler.Duplicates, resampler.DroppedSourceFrames,
+                    width, height, opts.Fps, complete ? null : problem).ToJson());
+            Console.Out.Flush();
+            Console.Error.Flush();
+            Environment.Exit(complete ? 0 : 1);
+        }, null, StopWatchdog, Timeout.InfiniteTimeSpan);
+
+        lock (gate)
+        {
+            encoder ??= StartEncoder();
+            if (!stopped)
+            {
+                stopped = true;
+                ShowPending();
+                Emit(resampler.Finish(stopQpcMs), null);
+            }
+        }
+        Step("drain");
+        drained[0] = writer!.Complete(DrainTimeout);
+        error ??= writer.Error;
+        long framesWritten = writer.Written;
+        long drainMs = phase.ElapsedMilliseconds;
+        Step("frame log");
+        frameLog.Flush();
+        Step("capture session");
+        session.Dispose();
+        Step("frame pool");
+        framePool.Dispose();
+        phase.Restart();
+        Step("ffmpeg input");
+        encoder.EndVideo();  // ffmpeg flushes the encoder while the audio file is padded and closed
+        Step("audio");
+        audio?.Finish(stopQpcMs);
+        if (audio?.Error is { } audioProblem) Console.Error.WriteLine($"audio: {audioProblem}");
+        long audioMs = phase.ElapsedMilliseconds;
+        var audioStatus = AudioNow();
+        phase.Restart();
+        Step("ffmpeg exit");
+        int ffmpegExit = encoder.Finish(FfmpegExitTimeout);
+        var stopTiming = new StopTiming(drainMs, audioMs, phase.ElapsedMilliseconds, FfmpegKilled: ffmpegExit == -1);
+        if (ffmpegExit == -1) error ??= $"ffmpeg did not exit after the end of its input (encoder {encoder.Encoder}); killed, the video keeps the fragments written before";
+        Step("ffmpeg dispose");
+        encoder.Dispose();
+        Step("audio dispose");
+        audio?.Dispose();
+        Step("converter dispose");
+        converter?.Dispose();
+        Step("recording.json");
+
+        var meta = Meta(framesWritten, ffmpegExit, stopTiming, error, audioStatus);
+        WriteRecordingJson(meta);
+        watchdog.Dispose();
 
         if (error is null && ffmpegExit != 0) error = $"ffmpeg exited with code {ffmpegExit}";
         if (sizeChangedFrames > 0)
@@ -397,7 +448,7 @@ public static class RecordCommand
             Path.Combine(opts.OutDir, VideoFinalize.Output), framesWritten, opts.Fps,
             opts.JsonStatus ? n => Console.WriteLine(new RecorderStatus(RecorderStatus.Finalizing, n).ToJson()) : null);
         meta["finalize"] = finalize.ToNode();
-        WriteRecordingJson();
+        WriteRecordingJson(meta);
         if (opts.JsonStatus)
             Console.WriteLine(new RecorderStatus(RecorderStatus.Finalized, finalize.Frames, Error: finalize.Error).ToJson());
         else if (finalize.Ok)

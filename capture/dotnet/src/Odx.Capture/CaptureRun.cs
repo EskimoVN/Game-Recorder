@@ -267,7 +267,7 @@ public sealed class CaptureRun : ICaptureRun
                 foreach (var (name, p) in new[] { ("odx input", input), ("odx record", record) })
                 {
                     if (p.HasExited) continue;
-                    p.Kill(entireProcessTree: true);
+                    p.Kill();  // not its ffmpeg: that one sees the end of its input and finishes video_raw.mp4 by itself
                     string last = p == record && LastStatus is { } s ? $" (last status: {s.Event}, {s.Frames} frames)" : "";
                     failure ??= $"{name} did not stop within {StopTimeout.TotalSeconds:0} s{last}; killed";
                     lock (_stderr) _stderr.Add(failure);
@@ -299,7 +299,9 @@ public sealed class CaptureRun : ICaptureRun
         var status = LastStatus is { Event: RecorderStatus.Stopped } stopped ? stopped : null;
         if (!captureOk)
             failure ??= status?.Error ?? FinalizeError() ?? (record.ExitCode != 0 ? $"odx record exited with {record.ExitCode}" : $"odx input exited with {input.ExitCode}");
-        // A recorder killed before it could finalize (or that crashed) still leaves a playable video.
+        // A recorder killed before it could finalize (or that crashed) still leaves a playable video, once the ffmpeg it
+        // left behind has finished writing it.
+        await SettledAsync(Path.Combine(SessionDir, VideoFinalize.RawVideo));
         if (VideoFinalize.RunIfNeeded(SessionDir, ExternalTools.Ffmpeg(), n => SetPhase(CapturePhase.Finalizing,
                 status is { Frames: > 0 } ? (int)Math.Clamp(n * 100 / status.Frames, 0, 100) : 0)) is { } late)
             lock (_stderr) _stderr.Add(late.Ok
@@ -325,6 +327,20 @@ public sealed class CaptureRun : ICaptureRun
         var result = new RunResult(SessionDir, captureOk, status, inputEvents, errors, build, failure);
         SetPhase(CapturePhase.Done, 100);
         return result;
+    }
+
+    /// <summary>Waits until the file has not grown for 2 s (20 s at most); returns at once when it does not exist.</summary>
+    private static async Task SettledAsync(string path)
+    {
+        long last = -1;
+        for (int i = 0; i < 10; i++)
+        {
+            if (!File.Exists(path)) return;
+            long size = new FileInfo(path).Length;
+            if (size == last) return;
+            last = size;
+            await Task.Delay(2000);
+        }
     }
 
     /// <summary>recording.json → finalize → error, when the recorder's exit code comes from a failed finalize.</summary>
