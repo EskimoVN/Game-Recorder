@@ -104,6 +104,7 @@ public sealed class Strings
     public required Func<string, bool, string, string> RoomStatus { get; init; }
     public required Func<string, string> StartRound { get; init; }
     public required Func<int, int, string> WaitingReady { get; init; }
+    public required Func<int, string> WaitingSaving { get; init; }
     public required Func<string, string> EndRound { get; init; }
     public required Func<string, string> ReadyButton { get; init; }
     public required Func<string, string> UnreadyButton { get; init; }
@@ -233,6 +234,7 @@ public sealed class Strings
         RoomStatus = (code, host, members) => $"Room {code}{(host ? " · you are the host: share this invite code" : "")}\nPlayers: {members}",
         StartRound = hotkey => $"Start round ({hotkey})",
         WaitingReady = (ready, others) => $"Waiting for players to be ready ({ready}/{others})",
+        WaitingSaving = saving => $"Waiting for {saving} player(s) to save the last round…",
         EndRound = hotkey => $"End round ({hotkey})",
         ReadyButton = hotkey => $"I'm ready ({hotkey})",
         UnreadyButton = hotkey => $"Not ready ({hotkey})",
@@ -375,6 +377,7 @@ public sealed class Strings
         RoomStatus = (code, host, members) => $"Room {code}{(host ? " · bạn là host: gửi mã mời này cho mọi người" : "")}\nNgười chơi: {members}",
         StartRound = hotkey => $"Bắt đầu round ({hotkey})",
         WaitingReady = (ready, others) => $"Chờ mọi người sẵn sàng ({ready}/{others})",
+        WaitingSaving = saving => $"Chờ {saving} người lưu xong round trước…",
         EndRound = hotkey => $"Kết thúc round ({hotkey})",
         ReadyButton = hotkey => $"Tôi sẵn sàng ({hotkey})",
         UnreadyButton = hotkey => $"Hủy sẵn sàng ({hotkey})",

@@ -321,7 +321,8 @@ public partial class MainWindow : Window
         switch (_state)
         {
             case RunState.Idle: BeginCountdown(); break;
-            case RunState.Agent when _agent is { IsHost: true, Room: { } room } && (room.CurrentSession is not null || WaitingFor(room).Count == 0):
+            case RunState.Agent when _agent is { IsHost: true, Room: { } room } &&
+                                     (room.CurrentSession is not null || Saving(room).Count == 0 && WaitingFor(room).Count == 0):
                 ToggleRound();
                 break;
             case RunState.Agent when _agent?.Room is { CurrentSession: null }: ToggleReady(); break;
@@ -347,7 +348,7 @@ public partial class MainWindow : Window
         StartStopButton.IsEnabled = _trayStartStop.Enabled = state != RunState.Stopping &&
             !(state == RunState.Agent && (_agent?.Room is not { } room ||
                                           (!_agent.IsHost && room.CurrentSession is not null) ||
-                                          (_agent.IsHost && room.CurrentSession is null && WaitingFor(room).Count > 0)));
+                                          (_agent.IsHost && room.CurrentSession is null && (Saving(room).Count > 0 || WaitingFor(room).Count > 0))));
         _trayStartStop.Text = state switch
         {
             RunState.Idle => _t.Start,
@@ -493,6 +494,7 @@ public partial class MainWindow : Window
     {
         string hotkey = _settings.Hotkey.ToString();
         if (_agent?.Room is not { } room) return _t.JoiningRoom;
+        if (_agent.IsHost && room.CurrentSession is null && Saving(room) is { Count: > 0 } saving) return _t.WaitingSaving(saving.Count);
         if (_agent.IsHost && room.CurrentSession is null && WaitingFor(room) is { Count: > 0 } waiting)
             return _t.WaitingReady(room.Members.Count - 1 - waiting.Count, room.Members.Count - 1);
         if (_agent.IsHost) return room.CurrentSession is null ? _t.StartRound(hotkey) : _t.EndRound(hotkey);
@@ -503,6 +505,9 @@ public partial class MainWindow : Window
     /// <summary>The other members the host waits for (the orchestrator checks the same before a round starts).</summary>
     private static List<RoomMember> WaitingFor(RoomUpdate room) =>
         room.Members.Where(m => m.PlayerId != room.HostPlayerId && !(m.Ready && m.State is "idle" or "armed")).ToList();
+
+    /// <summary>Members, the host included, still saving the last round (the orchestrator refuses a new round until they are done).</summary>
+    private static List<RoomMember> Saving(RoomUpdate room) => room.Members.Where(m => m.State is "starting" or "recording").ToList();
 
     private void Join_Click(object sender, RoutedEventArgs e)
     {

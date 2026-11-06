@@ -132,6 +132,9 @@ public sealed partial class MatchCoordinator
     private static List<AgentLink> NotReady(Room room) =>
         room.Members.Where(a => !room.IsHost(a) && !(a.Ready && a.State is "idle" or "armed")).ToList();
 
+    /// <summary>Members, the host included, whose capture of the last round is not done: a new round would leave them out.</summary>
+    private static List<AgentLink> Saving(Room room) => room.Members.Where(a => a.State is "starting" or "recording").ToList();
+
     /// <summary>A ZeroTier network for a new room; null (and the host told why) when this server cannot make one.</summary>
     private async Task<string?> CreateLanAsync(AgentLink link, CancellationToken stop)
     {

@@ -139,7 +139,8 @@ public sealed class OrchestratorTests : IAsyncLifetime
 
     /// <param name="room">Invite code to join; null opens a new room with this player as host.</param>
     /// <param name="timeServer">The NTP server the agent checks its clock against before being ready; null skips the check.</param>
-    private (AgentClient Agent, TaskCompletionSource Started) Connect(string? template, string player, string? room, string? timeServer = null)
+    private (AgentClient Agent, TaskCompletionSource Started) Connect(string? template, string player, string? room, string? timeServer = null,
+        TimeSpan building = default)
     {
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var agent = new AgentClient(new AgentOptions(_http.BaseAddress!, player, player.ToUpperInvariant(),
@@ -147,7 +148,7 @@ public sealed class OrchestratorTests : IAsyncLifetime
         {
             try
             {
-                return template is null ? throw new InvalidOperationException("no game window") : new FakeCapture(options, template);
+                return template is null ? throw new InvalidOperationException("no game window") : new FakeCapture(options, template, building);
             }
             finally
             {
@@ -587,6 +588,39 @@ public sealed class OrchestratorTests : IAsyncLifetime
 
         await host.ToggleRoundAsync(300, default);
         await hostStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public async Task AHostCannotStartARoundWhileSomeoneStillSavesTheLastOne()
+    {
+        string template = SessionFixtures.MakeValidSession(Path.Combine(_root, "template"));
+        var (host, _, code) = await HostRoom("p1");
+        var (member, memberStarted) = Connect(template, "p2", code, building: TimeSpan.FromSeconds(3));
+        await WaitForAgents(2, code);
+        var refused = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        host.RoomError += m => refused.TrySetResult(m);
+        var kept = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        member.RoundKept += (sid, _) => kept.TrySetResult(sid);
+
+        await member.SetReadyAsync(true, default);
+        for (int i = 0; i < 100 && !host.Room!.Members.All(m => m.PlayerId == "p1" || m.Ready); i++) await Task.Delay(50);
+        await host.ToggleRoundAsync(0, default);
+        await memberStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await host.ToggleRoundAsync(0, default);  // ends it: the member's capture now takes 3 s to build
+        for (int i = 0; i < 100 && (await RoomStatus(code))["current_session"] is not null; i++) await Task.Delay(50);
+
+        await member.SetReadyAsync(true, default);
+        await host.ToggleRoundAsync(0, default);
+        Assert.Contains("still saving the last round: P2", await refused.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Null((await RoomStatus(code))["current_session"]);
+
+        Assert.EndsWith("-r01", await kept.Task.WaitAsync(TimeSpan.FromSeconds(10)));
+        for (int i = 0; i < 100 && host.Room!.Members.Any(m => m.State != "idle"); i++) await Task.Delay(50);
+        await member.SetReadyAsync(true, default);
+        for (int i = 0; i < 100 && !host.Room!.Members.All(m => m.PlayerId == "p1" || m.Ready); i++) await Task.Delay(50);
+        await host.ToggleRoundAsync(0, default);
+        for (int i = 0; i < 100 && (await RoomStatus(code))["current_session"] is null; i++) await Task.Delay(50);
+        Assert.EndsWith("-r02", (string?)(await RoomStatus(code))["current_session"]);
     }
 
     [Fact]

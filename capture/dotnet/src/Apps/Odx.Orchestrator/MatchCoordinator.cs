@@ -88,6 +88,9 @@ public sealed partial class MatchCoordinator(OrchestratorOptions options, int ti
             case CloseRoom when room is not null && room.IsHost(link):
                 Close(room, effects);
                 break;
+            case ToggleRound when room is not null && room.IsHost(link) && room.Current is null && Saving(room) is { Count: > 0 } saving:
+                effects.Sends.Add((link, new RoomError($"still saving the last round: {string.Join(", ", saving.Select(a => a.Hello.Name))}")));
+                break;
             case ToggleRound when room is not null && room.IsHost(link) && room.Current is null && NotReady(room) is { Count: > 0 } waiting:
                 effects.Sends.Add((link, new RoomError($"not ready yet: {string.Join(", ", waiting.Select(a => a.Hello.Name))}")));
                 break;
