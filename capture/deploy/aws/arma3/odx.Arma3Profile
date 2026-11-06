@@ -1,0 +1,39 @@
+// Server profile (-profiles=/opt/arma3/profile -name=odx): the Custom difficulty that server.cfg forces. HUD elements off
+// (document/games/arma3.md §3, the client wants first- and third-person data so thirdPersonView stays 1; 2 would allow it in vehicles only).
+difficulty = "Custom";
+class DifficultyPresets
+{
+	class CustomDifficulty
+	{
+		class Options
+		{
+			reducedDamage = 0;
+			groupIndicators = 0;
+			friendlyTags = 0;
+			enemyTags = 0;
+			detectedMines = 0;
+			commands = 0;
+			waypoints = 0;
+			tacticalPing = 0;
+			weaponInfo = 0;
+			stanceIndicator = 0;
+			staminaBar = 0;
+			weaponCrosshair = 0;
+			visionAid = 0;
+			thirdPersonView = 1;
+			cameraShake = 1;
+			scoreTable = 0;
+			deathMessages = 0;
+			vonID = 0;
+			mapContent = 0;
+			autoReport = 0;
+			multipleSaves = 0;
+		};
+		aiLevelPreset = 3;
+	};
+	class CustomAILevel
+	{
+		skillAI = 0.5;
+		precisionAI = 0.5;
+	};
+};

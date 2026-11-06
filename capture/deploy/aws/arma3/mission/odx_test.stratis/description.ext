@@ -1,0 +1,14 @@
+onLoadName = "Odx test";
+author = "Odx";
+respawn = "BASE";
+respawnDelay = 5;
+respawnOnStart = 0;
+disabledAI = 1;
+joinUnassigned = 0;
+
+class Header
+{
+	gameType = Coop;
+	minPlayers = 1;
+	maxPlayers = 16;
+};
