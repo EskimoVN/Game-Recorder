@@ -123,6 +123,12 @@ class ODX_Settings
 		Print("ODX_Settings: player " + playerId + " invincible");
 	}
 
+	// A character spawned for a player has no player for the 1–6 s until the player controller takes it, and looks like
+	// AI; deleting it then breaks the spawn and leaves the spawn point reserved (SCR_SpawnPoint reservation failed, server
+	// 2026-11-06). So a character is removed only after this long without a player.
+	static const int UNOWNED_GRACE_MS = 10000;
+	protected static ref map<ChimeraCharacter, float> s_mUnownedSince = new map<ChimeraCharacter, float>();
+
 	// The AI limit stops the spawners that ask the AI world first (-disableAI sets the same limit); the AI the scenario
 	// spawned before game start, or by a spawner that does not ask, are removed every 2 s.
 	static void DisableAI()
@@ -144,6 +150,8 @@ class ODX_Settings
 		array<AIAgent> agents = {};
 		GetGame().GetAIWorld().GetAIAgents(agents);
 		PlayerManager players = GetGame().GetPlayerManager();
+		float now = GetGame().GetWorld().GetWorldTime();
+		set<ChimeraCharacter> unowned = new set<ChimeraCharacter>();
 		foreach (AIAgent agent : agents)
 		{
 			// Characters only: birds, animals and insects are AI agents too, and their native managers keep raw
@@ -151,12 +159,29 @@ class ODX_Settings
 			ChimeraCharacter character = ChimeraCharacter.Cast(agent.GetControlledEntity());
 			if (!character || players.GetPlayerIdFromControlledEntity(character) != 0)
 				continue;
+			unowned.Insert(character);
+			float since;
+			if (!s_mUnownedSince.Find(character, since))
+			{
+				s_mUnownedSince.Insert(character, now);
+				continue;
+			}
+			if (now - since < UNOWNED_GRACE_MS)
+				continue;
+			s_mUnownedSince.Remove(character);
 			ResourceName prefabName;
 			EntityPrefabData prefab = character.GetPrefabData();
 			if (prefab)
 				prefabName = prefab.GetPrefabName();
 			Print("ODX_Settings: AI removed " + prefabName);
 			SCR_EntityHelper.DeleteEntityAndChildren(character);
+		}
+		// Forget the characters a player took, and those gone some other way.
+		for (int i = s_mUnownedSince.Count() - 1; i >= 0; i--)
+		{
+			ChimeraCharacter character = s_mUnownedSince.GetKey(i);
+			if (!character || !unowned.Contains(character))
+				s_mUnownedSince.RemoveElement(i);
 		}
 	}
 }
