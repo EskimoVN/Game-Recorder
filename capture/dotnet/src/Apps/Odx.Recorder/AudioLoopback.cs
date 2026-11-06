@@ -138,12 +138,16 @@ internal sealed class AudioLoopback : IDisposable
         lock (_gate) _timeline.SetOrigin(qpcMs);
     }
 
-    /// <summary>Pads to <paramref name="stopQpcMs"/> and closes the file. Bounded: a stop never hangs on audio.</summary>
+    /// <summary>
+    /// Pads to <paramref name="stopQpcMs"/> and closes the file. Bounded: a stop never hangs on audio. The round of
+    /// 2026-11-06 (abcbc1) hung here with the capture thread inside WASAPI until odx-app killed the recorder, so a thread
+    /// that does not come back is left alone, WASAPI untouched (the process is about to exit).
+    /// </summary>
     public void Finish(double stopQpcMs)
     {
         _stopping = true;
-        if (!_thread.Join(TimeSpan.FromSeconds(2))) Error ??= "audio capture thread did not stop within 2 s";
-        _client.Stop();
+        if (_thread.Join(TimeSpan.FromSeconds(2))) _client.Stop();
+        else Error ??= "audio capture thread did not stop within 2 s (stuck in WASAPI); the file ends at its last packet";
         lock (_gate)
         {
             _timeline.SetOrigin(stopQpcMs);
@@ -151,7 +155,8 @@ internal sealed class AudioLoopback : IDisposable
             Enqueue(Silence(_timeline.SilenceTo(stopQpcMs)));
         }
         _queue.CompleteAdding();
-        if (!_writer.Join(TimeSpan.FromSeconds(5))) Error ??= "audio file not written out within 5 s";
+        if (_writer.Join(TimeSpan.FromSeconds(5))) _file.Dispose();  // the header gets its sizes
+        else Error ??= "audio file not written out within 5 s";  // keeps the streaming sizes, which ffmpeg reads too
     }
 
     /// <summary>What is being recorded, and the counters so far (final after <see cref="Finish"/>).</summary>
@@ -288,9 +293,11 @@ internal sealed class AudioLoopback : IDisposable
         }
     }
 
+    /// <summary>Releases WASAPI and the file, unless the capture thread is still inside WASAPI: then nothing is touched.</summary>
     public void Dispose()
     {
         _queue.CompleteAdding();
+        if (_thread.IsAlive) return;
         _client.Dispose();
         _file.Dispose();
         _packetReady.Dispose();
