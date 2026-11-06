@@ -87,8 +87,8 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
     /// <summary>Progress of joining the room's virtual LAN; null once out of it.</summary>
     public event Action<LanState?>? LanChanged;
 
-    /// <summary>A round's capture is done (session id, its folder, whether the capture worked).</summary>
-    public event Action<string, string, bool>? RoundKept;
+    /// <summary>A round's capture is done (session id, the capture's result: folder, whether it worked, why not).</summary>
+    public event Action<string, RunResult>? RoundKept;
 
     /// <summary>Whether this player is ready for the next round; the orchestrator clears it when play starts.</summary>
     public bool IsReady { get; private set; }
@@ -586,13 +586,14 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
             return;
         }
         bool ok = result.CaptureOk;
-        await SendDoneAsync(new Done(s.SessionId, ok, ok ? null : "capture failed"), stop);
+        string? failure = ok ? null : result.Failure ?? "capture failed";
+        await SendDoneAsync(new Done(s.SessionId, ok, failure), stop);
         await SendAsync(new AgentState("idle"), stop);
-        Log?.Invoke($"{s.SessionId} done: {(ok ? $"kept in {result.SessionDir}" : "capture failed")}");
+        Log?.Invoke($"{s.SessionId} done: {(ok ? $"kept in {result.SessionDir}" : failure)}");
         if (result.Recording?.Audio is { } audio && (audio.Source != AudioStatus.FromProcess || audio.SilentRatio > 0.99 || audio.Error is not null))
             Log?.Invoke($"{s.SessionId} audio: {audio.Source}{(audio.FallbackReason is { } f ? $" ({f})" : "")}" +
                         $"{(audio.SilentRatio is double r ? $", {r:P0} silent" : "")}{(audio.Error is { } e ? $", {e}" : "")}");
-        RoundKept?.Invoke(s.SessionId, result.SessionDir, ok);
+        RoundKept?.Invoke(s.SessionId, result);
         lock (_gate)
         {
             _run = null;

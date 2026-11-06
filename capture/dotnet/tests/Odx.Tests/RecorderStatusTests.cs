@@ -28,6 +28,16 @@ public class RecorderStatusTests
         Assert.Null(RecorderStatus.TryParse(new RecorderStatus(RecorderStatus.Progress).ToJson())!.Audio);
     }
 
+    [Fact]
+    public void Says_how_long_each_phase_of_stopping_took()
+    {
+        var status = new RecorderStatus(RecorderStatus.Stopped, 100, Stop: new StopTiming(120, 35, 30_000, FfmpegKilled: true));
+        string json = status.ToJson();
+        Assert.Contains("\"stop\":{\"drain_ms\":120,\"audio_ms\":35,\"ffmpeg_ms\":30000,\"ffmpeg_killed\":true}", json);
+        Assert.Equal(status, RecorderStatus.TryParse(json));
+        Assert.Null(RecorderStatus.TryParse(new RecorderStatus(RecorderStatus.Progress).ToJson())!.Stop);
+    }
+
     [Theory]
     [InlineData("recording 1920x1080 @ 60 fps to C:/x (Ctrl+C to stop)")]
     [InlineData("{not json")]

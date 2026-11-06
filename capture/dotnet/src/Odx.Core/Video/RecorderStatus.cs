@@ -10,8 +10,9 @@ namespace Odx.Core;
 /// </summary>
 /// <param name="Audio">The audio track's state when --audio was asked: on <c>started</c> where the sound comes from, on
 /// <c>stopped</c> its counters too. Null without --audio.</param>
+/// <param name="Stop">On <c>stopped</c>: how long each phase of stopping took.</param>
 public sealed record RecorderStatus(string Event, long Frames = 0, long Duplicates = 0, long Dropped = 0, int Width = 0,
-    int Height = 0, double Fps = 0, string? Error = null, AudioStatus? Audio = null)
+    int Height = 0, double Fps = 0, string? Error = null, AudioStatus? Audio = null, StopTiming? Stop = null)
 {
     public const string Started = "started", Progress = "progress", Stopped = "stopped";
 
@@ -36,6 +37,19 @@ public sealed record RecorderStatus(string Event, long Frames = 0, long Duplicat
             return null;
         }
     }
+}
+
+/// <summary>
+/// How long stopping took, phase by phase (RecorderStatus.Stop, recording.json → stop): a stop that ran into one of the
+/// recorder's time limits says which, instead of the capture host killing the recorder after a minute and knowing nothing.
+/// </summary>
+/// <param name="DrainMs">Writing the queued frames to ffmpeg.</param>
+/// <param name="AudioMs">Padding the audio track to the stop and closing its pipe.</param>
+/// <param name="FfmpegMs">ffmpeg finishing the file once both inputs ended.</param>
+/// <param name="FfmpegKilled">ffmpeg did not exit within its limit and was killed: the file is unusable.</param>
+public sealed record StopTiming(long DrainMs, long AudioMs, long FfmpegMs, bool FfmpegKilled)
+{
+    public JsonNode ToNode() => JsonSerializer.SerializeToNode(this, RecorderStatus.Options)!;
 }
 
 /// <summary>

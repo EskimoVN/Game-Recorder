@@ -150,8 +150,10 @@ internal sealed class AudioLoopback : IDisposable
             Enqueue(Silence(_timeline.SilenceTo(stopQpcMs)));
         }
         _queue.CompleteAdding();
-        if (!_writer.Join(TimeSpan.FromSeconds(10))) Error ??= "ffmpeg stopped reading the audio pipe";
-        _pipe.Dispose();
+        // A writer still blocked in Write holds the pipe open whatever Dispose does: the pipe closes once ffmpeg, which
+        // stopped reading it, has exited or been killed (Dispose).
+        if (_writer.Join(TimeSpan.FromSeconds(10))) _pipe.Dispose();
+        else Error ??= "ffmpeg stopped reading the audio pipe";
     }
 
     /// <summary>What is being recorded, and the counters so far (final after <see cref="Finish"/>).</summary>

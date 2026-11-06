@@ -11,8 +11,12 @@ internal sealed class FfmpegEncoder : IDisposable
     private readonly Process _proc;
     private readonly Stream _stdin;
 
+    /// <summary>nvenc, mf or x264.</summary>
+    public string Encoder { get; }
+
     public FfmpegEncoder(string ffmpeg, string output, int width, int height, double fps, string encoder, AudioInput? audio = null)
     {
+        Encoder = encoder;
         string codec = encoder switch
         {
             "nvenc" => "-c:v h264_nvenc -preset p4 -rc vbr -cq 23 -bf 0 -g 120",
@@ -41,11 +45,17 @@ internal sealed class FfmpegEncoder : IDisposable
 
     public void EndVideo() => _stdin.Close();
 
-    public int Finish()
+    /// <summary>
+    /// Ends the video input and waits for ffmpeg to finish the file. -1 when it has not exited within <paramref name="wait"/>
+    /// (a hardware encoder that never drains, or an input it still waits on): it is killed, and the file is unusable.
+    /// </summary>
+    public int Finish(TimeSpan wait)
     {
         EndVideo();
+        if (_proc.WaitForExit(wait)) return _proc.ExitCode;
+        _proc.Kill();
         _proc.WaitForExit();
-        return _proc.ExitCode;
+        return -1;
     }
 
     public void Dispose() => _proc.Dispose();

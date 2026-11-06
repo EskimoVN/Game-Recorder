@@ -32,6 +32,12 @@ namespace Odx.Recorder;
 
 public static class RecordCommand
 {
+    // Every wait on the stop path has a limit, so a stuck ffmpeg ends in a recording.json that says which phase stuck
+    // (StopTiming) rather than in the capture host killing this process a minute later and knowing nothing.
+    private static readonly TimeSpan RentWait = TimeSpan.FromMilliseconds(100);
+    private static readonly TimeSpan DrainTimeout = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan FfmpegExitTimeout = TimeSpan.FromSeconds(30);
+
     public static int Run(string[] args)
     {
         var opts = Options.Parse(args);
@@ -179,11 +185,18 @@ public static class RecordCommand
             shown = next;
         }
 
+        long starvedFrames = 0;
         void ShowPending()
         {
             if (pending is not { } p) return;
             pending = null;
-            var incoming = writer!.Rent();
+            // Runs under the gate, which the stop path takes: when ffmpeg is a whole pool behind, this frame goes and the
+            // one on screen stands in (duplicated by the grid), rather than everything waiting on ffmpeg.
+            if (!writer!.TryRent(RentWait, out var incoming))
+            {
+                starvedFrames++;
+                return;
+            }
             converter!.Read(p.Staging, incoming);
             Emit(resampler.Advance(p.T), incoming);
         }
@@ -285,6 +298,7 @@ public static class RecordCommand
         }
 
         double stopQpcMs = QpcClock.NowMs();
+        var phase = Stopwatch.StartNew();
         lock (gate)
         {
             encoder ??= StartEncoder();
@@ -295,12 +309,14 @@ public static class RecordCommand
                 Emit(resampler.Finish(stopQpcMs), null);
             }
         }
-        writer!.Complete();
+        writer!.Complete(DrainTimeout);
         error ??= writer.Error;
         long framesWritten = writer.Written;
+        long drainMs = phase.ElapsedMilliseconds;
         frameLog.Flush();
         session.Dispose();
         framePool.Dispose();
+        phase.Restart();
         if (audio is not null)
         {
             // Video ends first: ffmpeg stops reading the audio pipe while it waits for video, so audio's final padding would
@@ -309,8 +325,12 @@ public static class RecordCommand
             audio.Finish(stopQpcMs);
             if (audio.Error is not null) Console.Error.WriteLine($"audio: {audio.Error}");
         }
+        long audioMs = phase.ElapsedMilliseconds;
         var audioStatus = AudioNow();
-        int ffmpegExit = encoder.Finish();
+        phase.Restart();
+        int ffmpegExit = encoder.Finish(FfmpegExitTimeout);
+        var stopTiming = new StopTiming(drainMs, audioMs, phase.ElapsedMilliseconds, FfmpegKilled: ffmpegExit == -1);
+        if (ffmpegExit == -1) error ??= $"ffmpeg did not exit after the end of its input (encoder {encoder.Encoder}); killed";
         encoder.Dispose();
         audio?.Dispose();
         converter?.Dispose();
@@ -334,8 +354,10 @@ public static class RecordCommand
             ["duplicate_frames"] = resampler.Duplicates,
             ["dropped_source_frames"] = resampler.DroppedSourceFrames,
             ["size_changed_frames"] = sizeChangedFrames,
+            ["starved_frames"] = starvedFrames,
             ["first_frame_capture_latency_ms"] = firstFrameLatencyMs,
             ["ffmpeg_exit_code"] = ffmpegExit,
+            ["stop"] = stopTiming.ToNode(),
             ["error"] = error,
             ["audio"] = audioStatus is null ? null : new Dictionary<string, object?>
             {
@@ -358,7 +380,7 @@ public static class RecordCommand
         if (opts.JsonStatus)
         {
             Console.WriteLine(new RecorderStatus(RecorderStatus.Stopped, framesWritten, resampler.Duplicates,
-                resampler.DroppedSourceFrames, width, height, opts.Fps, error, audioStatus).ToJson());
+                resampler.DroppedSourceFrames, width, height, opts.Fps, error, audioStatus, stopTiming).ToJson());
         }
         else
         {

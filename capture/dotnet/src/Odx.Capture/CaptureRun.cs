@@ -25,8 +25,10 @@ public sealed record ObsConnection(string Address, string? Password);
 /// <param name="Recording">odx record's final status (frame counts); null if it never reported one.</param>
 /// <param name="ToolErrors">stderr lines of the capture tools (warnings such as an unreachable NTP server included).</param>
 /// <param name="Build">Null when no game profile was selected.</param>
+/// <param name="Failure">Why the capture failed, in one line: a tool that had to be killed, the recorder's own error, or
+/// its exit code. Null when <paramref name="CaptureOk"/>.</param>
 public sealed record RunResult(string SessionDir, bool CaptureOk, RecorderStatus? Recording, int InputEvents,
-    IReadOnlyList<string> ToolErrors, BuildResult? Build)
+    IReadOnlyList<string> ToolErrors, BuildResult? Build, string? Failure = null)
 {
     public bool Ok => CaptureOk && (Build is null || (Build.Error is null && Build.Issues.All(i => i.Severity != Issue.ErrorSeverity)));
 }
@@ -195,21 +197,29 @@ public sealed class CaptureRun : ICaptureRun
         await Task.WhenAny(input.WaitForExitAsync(), record.WaitForExitAsync());
         _stop.Set();
         using var timeout = new CancellationTokenSource(StopTimeout);
+        string? failure = null;
         try
         {
             await Task.WhenAll(input.WaitForExitAsync(timeout.Token), record.WaitForExitAsync(timeout.Token));
         }
         catch (OperationCanceledException)
         {
-            foreach (var p in new[] { input, record })
-                if (!p.HasExited) p.Kill();
-            lock (_stderr) _stderr.Add("a capture tool did not stop in time and was killed");
+            foreach (var (name, p) in new[] { ("odx input", input), ("odx record", record) })
+            {
+                if (p.HasExited) continue;
+                p.Kill();
+                string last = p == record && LastStatus is { } s ? $" (last status: {s.Event}, {s.Frames} frames)" : "";
+                failure ??= $"{name} did not stop within {StopTimeout.TotalSeconds:0} s{last}; killed";
+                lock (_stderr) _stderr.Add(failure);
+            }
         }
         _stop.Dispose();
         _captureStopped.TrySetResult();
 
         bool captureOk = input.ExitCode == 0 && record.ExitCode == 0;
         var status = LastStatus is { Event: RecorderStatus.Stopped } stopped ? stopped : null;
+        if (!captureOk)
+            failure ??= status?.Error ?? (record.ExitCode != 0 ? $"odx record exited with {record.ExitCode}" : $"odx input exited with {input.ExitCode}");
         string inputCsv = Path.Combine(SessionDir, "input_events.csv");
         int inputEvents = File.Exists(inputCsv) ? Math.Max(0, File.ReadLines(inputCsv).Count() - 1) : 0;
         if (_reforgerDir is not null &&
@@ -226,7 +236,7 @@ public sealed class CaptureRun : ICaptureRun
         {
             errors.Add($"raw logs not moved into {CaptureFolder.RawDir}/: {e.Message}");
         }
-        return new RunResult(SessionDir, captureOk, status, inputEvents, errors, build);
+        return new RunResult(SessionDir, captureOk, status, inputEvents, errors, build, failure);
     }
 
     /// <summary>Null without a profile; an unreadable profile is reported when the session is built.</summary>

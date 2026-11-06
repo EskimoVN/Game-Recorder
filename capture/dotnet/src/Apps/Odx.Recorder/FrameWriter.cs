@@ -6,7 +6,7 @@ namespace Odx.Recorder;
 /// <summary>
 /// Writes grid ticks to ffmpeg and video_frames.csv on its own thread, so the capture callback does not wait for the
 /// encoder: while that callback is blocked, Windows.Graphics.Capture (2-buffer frame pool) drops frames and the video
-/// jumps. Frames are pooled buffers; one goes back to the pool once its ticks are written, and <see cref="Rent"/> blocks
+/// jumps. Frames are pooled buffers; one goes back to the pool once its ticks are written, and <see cref="TryRent"/> fails
 /// only when the encoder is a whole pool behind.
 /// </summary>
 internal sealed class FrameWriter
@@ -37,14 +37,23 @@ internal sealed class FrameWriter
 
     public byte[] Rent() => _free.Take();
 
+    /// <summary>A pooled buffer, or false when none came back within <paramref name="wait"/>: the caller drops its frame.</summary>
+    public bool TryRent(TimeSpan wait, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out byte[]? frame) =>
+        _free.TryTake(out frame, wait);
+
     /// <summary>Queues <paramref name="ticks"/>, all showing <paramref name="frame"/>, which returns to the pool after.</summary>
     public void Submit(byte[] frame, IReadOnlyList<GridTick> ticks) => _queue.Add((frame, ticks));
 
-    /// <summary>Writes what is queued; <see cref="Submit"/> may not be called after.</summary>
-    public void Complete()
+    /// <summary>
+    /// Writes what is queued; <see cref="Submit"/> may not be called after. False when ffmpeg did not take it all within
+    /// <paramref name="wait"/>: the writer is left blocked on ffmpeg's stdin and <see cref="Error"/> says so.
+    /// </summary>
+    public bool Complete(TimeSpan wait)
     {
         _queue.CompleteAdding();
-        _thread.Join();
+        if (_thread.Join(wait)) return true;
+        _error ??= "ffmpeg stopped reading video";
+        return false;
     }
 
     private void Run()
