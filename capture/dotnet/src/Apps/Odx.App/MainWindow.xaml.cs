@@ -40,6 +40,7 @@ public partial class MainWindow : Window
 
     private readonly AppSettings _settings = AppSettings.Load();
     private readonly CaptureConfig _config;
+    private readonly DailyLogFile _log = new(PackageFolders.Logs);
     private readonly DispatcherTimer _clock = new() { Interval = TimeSpan.FromSeconds(1) };
     private readonly Forms.NotifyIcon _tray = new();
     private readonly Forms.ToolStripMenuItem _trayStartStop = new(), _trayShow = new(), _trayExit = new();
@@ -470,6 +471,7 @@ public partial class MainWindow : Window
     private void OnRunCompleted(RunResult result)
     {
         _run = null;
+        foreach (string line in RoomSession.LogLines(Path.GetFileName(result.SessionDir), result)) _log.Write(line);
         SetState(RunState.Idle, t => t.Describe(result));
         var (title, body) = _t.Notification(result);
         ToastOverlay.Notify(result.Ok, title, body);
@@ -531,7 +533,7 @@ public partial class MainWindow : Window
         var room = new RoomSession(new AgentOptions(orchestrator, _settings.PlayerId, _settings.PlayerName, PackageFolders.Captures,
             _settings.WindowProcess, RoomCode: code, CreateRoom: code is null, AccessKey: _config.AccessKey, Lan: lan,
             TimeServer: _config.TimeServer),
-            StartAgentCapture, _packets.GetAsync);
+            StartAgentCapture, _packets.GetAsync, _log);
         var agent = room.Agent;
         agent.Countdown += (ms, cancelled) => Dispatcher.BeginInvoke(() => ShowAgentCountdown(ms, cancelled));
         room.Changed += () => Dispatcher.BeginInvoke(() =>
@@ -542,9 +544,11 @@ public partial class MainWindow : Window
         {
             if (_room == room) OfferZeroTier(room);
         });
-        agent.RoundKept += (session, dir, ok) => Dispatcher.BeginInvoke(() =>
+        agent.RoundKept += (session, result) => Dispatcher.BeginInvoke(() =>
         {
             if (_room != room) return;
+            bool ok = result.CaptureOk;
+            string dir = result.SessionDir;
             _roundResult = ok ? t => t.RoundKept(session, dir) : t => t.RoundCaptureFailed(session, dir);
             ToastOverlay.Notify(ok, _roundResult(_t));
             if (_run is null) ShowAgentStatus();

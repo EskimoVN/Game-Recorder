@@ -59,7 +59,7 @@ public static class HeadlessAgent
             if (PktmonCapture.IsElevated) return Task.FromResult<IPacketCapture?>(new PktmonCapture());
             Console.WriteLine($"{DateTime.Now:HH:mm:ss} {player}: this game's packets are recorded only when run as administrator");
             return Task.FromResult<IPacketCapture?>(null);
-        });
+        }, new DailyLogFile(PackageFolders.Logs));
         Console.CancelKeyPress += (_, e) =>
         {
             e.Cancel = true;

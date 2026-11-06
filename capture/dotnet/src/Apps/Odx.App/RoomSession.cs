@@ -8,6 +8,7 @@ namespace Odx.App;
 /// <summary>
 /// One player's time in a room, the same for the window and for --headless: the agent and its connection, the packet capture
 /// its game asks for, and what a status line shows (last log line, LAN, packets). Events come from background threads.
+/// Everything the agent says, and each round's result in full, goes to the daily log when one is given.
 /// </summary>
 public sealed class RoomSession : IDisposable
 {
@@ -15,14 +16,21 @@ public sealed class RoomSession : IDisposable
     private readonly Func<Task<IPacketCapture?>> _packets;
 
     /// <param name="packets">Gives the packet capture when the room's game wants one; null when it cannot be had.</param>
-    public RoomSession(AgentOptions options, Func<CaptureOptions, ICaptureRun> startCapture, Func<Task<IPacketCapture?>> packets)
+    public RoomSession(AgentOptions options, Func<CaptureOptions, ICaptureRun> startCapture, Func<Task<IPacketCapture?>> packets,
+        DailyLogFile? log = null)
     {
         _packets = packets;
         Agent = new AgentClient(options, startCapture);
         Agent.Log += line =>
         {
             LastLog = $"{DateTime.Now:HH:mm:ss} {line}";
+            log?.Write(line);
             Changed?.Invoke();
+        };
+        Agent.RoundKept += (session, result) =>
+        {
+            if (log is null) return;
+            foreach (string line in LogLines(session, result)) log.Write(line);
         };
         Agent.LanChanged += lan =>
         {
@@ -34,6 +42,15 @@ public sealed class RoomSession : IDisposable
         Agent.ClockChecked += _ => Changed?.Invoke();
         Agent.ProbeCapture = CaptureRun.ProbeAsync;
         Agent.CaptureProbed += _ => Changed?.Invoke();
+    }
+
+    /// <summary>A capture's result as the log keeps it: outcome, the recorder's final status, every tool message.</summary>
+    public static IEnumerable<string> LogLines(string session, RunResult result)
+    {
+        yield return $"{session}: {(result.CaptureOk ? "capture ok" : $"capture failed: {result.Failure}")}, " +
+                     $"{result.InputEvents} input events, build {(result.Build is null ? "skipped" : result.Build.Error ?? $"{result.Build.Issues.Count} issue(s)")}, in {result.SessionDir}";
+        if (result.Recording is { } recording) yield return $"{session}: odx record {recording.ToJson()}";
+        foreach (string error in result.ToolErrors) yield return $"{session}: {error}";
     }
 
     /// <summary>Measures the clock again (after a sync); null when not connected.</summary>
