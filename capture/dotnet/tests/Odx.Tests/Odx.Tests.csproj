@@ -21,6 +21,6 @@
   </ItemGroup>
   <ItemGroup>
     <!-- Pinned log formats: the C# writers (and the C++ camera_samples.csv writer) must reproduce them byte for byte. -->
-    <None Include="../../fixtures/*.csv;../../fixtures/*.jsonl;../../fixtures/*.dem;../../fixtures/*.bin" Link="fixtures/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../fixtures/*.csv;../../fixtures/*.jsonl;../../fixtures/*.dem;../../fixtures/*.bin;../../fixtures/*.wav" Link="fixtures/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

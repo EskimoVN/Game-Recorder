@@ -66,6 +66,21 @@ The recording is shorter than 10 s; play longer before ending the round.
 Median RTT to the time service above 100 ms: a slow or distant link to the server (see [network.md](network.md)), or UDP
 12300 is blocked (then there are no samples at all).
 
+## A round's folder has video_raw.mp4 and audio.wav but no video.mp4
+
+The recorder was killed (odx-app closed, PC off) before it could finalize the video, or the finalize failed
+(`data\logs\odx-app-<date>.log`: `video not finalized: …`, or `recording.json` → `finalize.error`). The parts are the
+whole round: `video_raw.mp4` plays as it is (fragmented MP4, video only) and `audio.wav` is the sound from video frame 0.
+Make the delivered video from them, then build the session:
+
+```
+odx build <round folder> --profile games\<game>.json
+```
+
+`odx build` finalizes first (`finalized video.mp4: N frames with sound`) and deletes the parts once `video.mp4` stands. A
+`video.mp4 has N frames, video_frames.csv M` message means ffmpeg was killed while recording: the video is playable but
+short of the last fragment (≤ 4 s), and the round fails validation.
+
 ## No notice after a round
 
 The notices show in the top right corner of the main screen for 6–10 s. If none came, look at the app's status line and

@@ -181,6 +181,9 @@ public sealed class ReconnectTests : IAsyncLifetime
     /// <summary>Notes when the capture was told to stop.</summary>
     private sealed class FakeRun(ICaptureRun inner) : ICaptureRun
     {
+        public CapturePhase Phase => CapturePhase.Recording;
+        public int FinalizePercent => 0;
+        public event Action? PhaseChanged { add { } remove { } }
         public DateTime? StoppedAt { get; private set; }
         public string SessionDir => inner.SessionDir;
         public Task Started => inner.Started;

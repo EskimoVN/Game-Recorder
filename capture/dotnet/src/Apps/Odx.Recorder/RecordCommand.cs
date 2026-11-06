@@ -11,15 +11,19 @@
 // (GridResampler) and piped to ffmpeg, so the MP4 is CFR and its frame N is row N of video_frames.csv. Writes:
 //   <dir>/video.mp4         CFR H.264, no B-frames; --audio: plus an AAC track, sample 0 at video frame 0, of the game
 //                           process's own sound (--audio-process, else the --window process; not voice chat, browsers or
-//                           other apps), or of everything the default playback device plays when no game process is known
+//                           other apps), or of everything the default playback device plays when no game process is known.
+//                           Made at the end from video_raw.mp4 (fragmented, video only) and audio.wav (VideoFinalize),
+//                           which stay only when that failed
 //   <dir>/video_frames.csv  frame_index,t_grid_qpc_ms,t_source_qpc_ms,duplicate
 //   <dir>/recording.json    capture id, capture and screen size, fps, encoder, start time (UTC + QPC),
 //                           counts of duplicated/dropped frames, audio (null without --audio: sample rate, channels,
-//                           start, and a status: source process|device|none, fallback reason, timing, counters)
+//                           start, and a status: source process|device|none, fallback reason, timing, counters), finalize
 // --obs: OBS records instead, with its own scene, output and audio settings (ObsRecorder); the WebSocket password, if
 // any, comes from the ODX_OBS_PASSWORD environment variable. The same three files are written.
-// Stop with Ctrl+C, --seconds, --stop-event (a named event set by Odx.App), or by closing the captured window.
-// --json-status: stdout carries only RecorderStatus JSON lines (started, progress every second, stopped).
+// Stop with Ctrl+C, --seconds, --stop-event (a named event set by Odx.App), or by closing the captured window. While
+// recording, ffmpeg writes a fragmented, video-only video_raw.mp4 and the sound goes to audio.wav; once the capture has
+// stopped the two become video.mp4 (VideoFinalize), so no pipe can hold the stop and a kill never loses the round.
+// --json-status: stdout carries only RecorderStatus JSON lines (started, progress every second, stopped, finalizing, finalized).
 using System.Diagnostics;
 using System.Text.Json;
 using Odx.Core;
@@ -33,10 +37,11 @@ namespace Odx.Recorder;
 public static class RecordCommand
 {
     // Every wait on the stop path has a limit, so a stuck ffmpeg ends in a recording.json that says which phase stuck
-    // (StopTiming) rather than in the capture host killing this process a minute later and knowing nothing.
+    // (StopTiming) rather than in the capture host killing this process and knowing nothing: the limits in a row (drain,
+    // AudioLoopback.Finish, ffmpeg's exit) must add up to well under CaptureRun.StopTimeout (60 s).
     private static readonly TimeSpan RentWait = TimeSpan.FromMilliseconds(100);
-    private static readonly TimeSpan DrainTimeout = TimeSpan.FromSeconds(20);
-    private static readonly TimeSpan FfmpegExitTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan DrainTimeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan FfmpegExitTimeout = TimeSpan.FromSeconds(20);
 
     public static int Run(string[] args)
     {
@@ -131,8 +136,8 @@ public static class RecordCommand
         FfmpegEncoder StartEncoder()
         {
             var nv12 = StartConverter();
-            var started = new FfmpegEncoder(opts.Ffmpeg, Path.Combine(opts.OutDir, "video.mp4"), width, height, opts.Fps,
-                encoderName.Result, audio?.Input);
+            var started = new FfmpegEncoder(opts.Ffmpeg, Path.Combine(opts.OutDir, VideoFinalize.RawVideo), width, height, opts.Fps,
+                encoderName.Result);
             writer = new FrameWriter(started, frameLog, nv12.FrameBytes);
             shown = writer.Rent();
             return started;
@@ -153,7 +158,7 @@ public static class RecordCommand
             {
                 try
                 {
-                    audio = new AudioLoopback(pid);
+                    audio = new AudioLoopback(pid, Path.Combine(opts.OutDir, VideoFinalize.AudioFile));
                 }
                 catch (Exception e)
                 {
@@ -165,7 +170,7 @@ public static class RecordCommand
             {
                 try
                 {
-                    audio = new AudioLoopback();
+                    audio = new AudioLoopback(Path.Combine(opts.OutDir, VideoFinalize.AudioFile));
                 }
                 catch (Exception e)
                 {
@@ -318,20 +323,15 @@ public static class RecordCommand
         session.Dispose();
         framePool.Dispose();
         phase.Restart();
-        if (audio is not null)
-        {
-            // Video ends first: ffmpeg stops reading the audio pipe while it waits for video, so audio's final padding would
-            // block forever. Both inputs must end before encoder.Finish waits for ffmpeg to exit.
-            encoder.EndVideo();
-            audio.Finish(stopQpcMs);
-            if (audio.Error is not null) Console.Error.WriteLine($"audio: {audio.Error}");
-        }
+        encoder.EndVideo();  // ffmpeg flushes the encoder while the audio file is padded and closed
+        audio?.Finish(stopQpcMs);
+        if (audio?.Error is { } audioProblem) Console.Error.WriteLine($"audio: {audioProblem}");
         long audioMs = phase.ElapsedMilliseconds;
         var audioStatus = AudioNow();
         phase.Restart();
         int ffmpegExit = encoder.Finish(FfmpegExitTimeout);
         var stopTiming = new StopTiming(drainMs, audioMs, phase.ElapsedMilliseconds, FfmpegKilled: ffmpegExit == -1);
-        if (ffmpegExit == -1) error ??= $"ffmpeg did not exit after the end of its input (encoder {encoder.Encoder}); killed";
+        if (ffmpegExit == -1) error ??= $"ffmpeg did not exit after the end of its input (encoder {encoder.Encoder}); killed, the video keeps the fragments written before";
         encoder.Dispose();
         audio?.Dispose();
         converter?.Dispose();
@@ -368,12 +368,13 @@ public static class RecordCommand
                 ["status"] = audioStatus.ToNode(),
             },
         };
-        File.WriteAllText(Path.Combine(opts.OutDir, "recording.json"),
+        void WriteRecordingJson() => File.WriteAllText(Path.Combine(opts.OutDir, "recording.json"),
             JsonSerializer.Serialize(meta, new JsonSerializerOptions
             {
                 WriteIndented = true,
                 Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
             }));
+        WriteRecordingJson();
 
         if (error is null && ffmpegExit != 0) error = $"ffmpeg exited with code {ffmpegExit}";
         if (sizeChangedFrames > 0)
@@ -389,7 +390,20 @@ public static class RecordCommand
                               $"{resampler.DroppedSourceFrames} dropped, ffmpeg exit {ffmpegExit}");
         }
         if (error is not null) Console.Error.WriteLine(error);
-        return error is null && ffmpegExit == 0 ? 0 : 1;
+
+        // The capture is on disk whatever happens next: video_raw.mp4 (fragmented) and audio.wav become video.mp4 here,
+        // or in odx build / the capture host if this process is killed first (document/record-finalize-plan.md).
+        var finalize = VideoFinalize.Run(opts.Ffmpeg, Path.Combine(opts.OutDir, VideoFinalize.RawVideo), audio?.Input.File,
+            Path.Combine(opts.OutDir, VideoFinalize.Output), framesWritten, opts.Fps,
+            opts.JsonStatus ? n => Console.WriteLine(new RecorderStatus(RecorderStatus.Finalizing, n).ToJson()) : null);
+        meta["finalize"] = finalize.ToNode();
+        WriteRecordingJson();
+        if (opts.JsonStatus)
+            Console.WriteLine(new RecorderStatus(RecorderStatus.Finalized, finalize.Frames, Error: finalize.Error).ToJson());
+        else if (finalize.Ok)
+            Console.WriteLine($"finalized: video.mp4, {finalize.Frames} frames{(finalize.HasAudio ? " with sound" : "")}, {finalize.ElapsedMs} ms");
+        if (!finalize.Ok) Console.Error.WriteLine($"finalize: {finalize.Error}");
+        return error is null && ffmpegExit == 0 && finalize.Ok ? 0 : 1;
     }
 
     private static int RunObs(Options opts, string address)

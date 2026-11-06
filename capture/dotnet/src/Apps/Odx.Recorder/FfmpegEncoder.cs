@@ -3,8 +3,10 @@ using System.Diagnostics;
 namespace Odx.Recorder;
 
 /// <summary>
-/// Encodes raw NV12 frames piped to an ffmpeg process into a constant-frame-rate MP4 without B-frames, with an AAC track
-/// from an <see cref="AudioInput"/> when given.
+/// Encodes raw NV12 frames piped to an ffmpeg process into a constant-frame-rate, fragmented MP4 without B-frames
+/// (video_raw.mp4). ffmpeg has this one input and nothing to wait for but the next frame, and a fragment is closed at
+/// every keyframe (4 s at 30 fps), so a killed ffmpeg still leaves a playable file minus its last fragment; the sound is
+/// muxed in afterwards (VideoFinalize).
 /// </summary>
 internal sealed class FfmpegEncoder : IDisposable
 {
@@ -14,7 +16,7 @@ internal sealed class FfmpegEncoder : IDisposable
     /// <summary>nvenc, mf or x264.</summary>
     public string Encoder { get; }
 
-    public FfmpegEncoder(string ffmpeg, string output, int width, int height, double fps, string encoder, AudioInput? audio = null)
+    public FfmpegEncoder(string ffmpeg, string output, int width, int height, double fps, string encoder)
     {
         Encoder = encoder;
         string codec = encoder switch
@@ -26,28 +28,24 @@ internal sealed class FfmpegEncoder : IDisposable
             _ => throw new ArgumentException($"unknown encoder '{encoder}' (nvenc|mf|x264)"),
         };
         var fr = fps.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        // The audio input comes first: ffmpeg opens inputs in order, and the pipe's writer waits for it to connect.
-        // Both inputs start at timestamp 0, so audio sample 0 is video frame 0. The audio queue holds ~20 s of 4 KB
-        // packets, so audio running ahead of a stalled video does not block its writer.
-        var (audioIn, audioOut) = audio is null ? ("", "")
-            : ($"-thread_queue_size 1024 -f {audio.SampleFormat} -ar {audio.SampleRate} -ac {audio.Channels} -i \"{audio.Pipe}\" ",
-               "-map 1:v -map 0:a -c:a aac -b:a 160k ");
-        var args = $"-y -loglevel error {audioIn}-f rawvideo -pix_fmt nv12 -s {width}x{height} -framerate {fr} -i - " +
-                   $"{audioOut}{codec} -r {fr} \"{output}\"";
+        var args = $"-y -loglevel error -nostdin -f rawvideo -pix_fmt nv12 -s {width}x{height} -framerate {fr} -i - " +
+                   $"{codec} -r {fr} -movflags +frag_keyframe+empty_moov+default_base_moof -f mp4 \"{output}\"";
         _proc = Process.Start(new ProcessStartInfo(ffmpeg, args)
         {
             RedirectStandardInput = true,
             UseShellExecute = false,
         }) ?? throw new InvalidOperationException("cannot start ffmpeg");
-        _stdin = _proc.StandardInput.BaseStream;    }
+        _stdin = _proc.StandardInput.BaseStream;
+    }
 
-    public void Write(byte[] bgraFrame) => _stdin.Write(bgraFrame, 0, bgraFrame.Length);
+    public void Write(byte[] nv12Frame) => _stdin.Write(nv12Frame, 0, nv12Frame.Length);
 
+    /// <summary>Ends the input: ffmpeg flushes the encoder and closes the file.</summary>
     public void EndVideo() => _stdin.Close();
 
     /// <summary>
-    /// Ends the video input and waits for ffmpeg to finish the file. -1 when it has not exited within <paramref name="wait"/>
-    /// (a hardware encoder that never drains, or an input it still waits on): it is killed, and the file is unusable.
+    /// Ends the input and waits for ffmpeg to finish the file. -1 when it has not exited within <paramref name="wait"/>
+    /// (a hardware encoder that never drains): it is killed, and the file keeps the fragments written before.
     /// </summary>
     public int Finish(TimeSpan wait)
     {

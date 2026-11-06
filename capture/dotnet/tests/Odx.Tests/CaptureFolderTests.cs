@@ -74,6 +74,35 @@ public class CaptureFolderTests
         }
     }
 
+    [Fact]
+    public void Round_events_of_a_killed_recording_get_no_video_time()
+    {
+        string dir = NewCapture();
+        try
+        {
+            CaptureFolder.Tidy(dir);
+            File.Delete(Path.Combine(dir, "raw", "recording.json"));
+            string frames = Path.Combine(dir, "raw", "video_frames.csv");
+            string rows = File.ReadAllText(frames);
+            File.WriteAllText(frames, rows[..(rows.TrimEnd('\n').LastIndexOf('\n') + 1)] + "119,");  // the buffered last row was cut
+            using (var ntp = new NtpSampleWriter(new StreamWriter(Path.Combine(dir, "raw", "ntp_samples.csv"))))
+                ntp.Write(new NtpSample(T0, UtcAtT0 + 250, 10, 250, "orchestrator:12300"));
+            double start = UtcAtT0 + 750;
+            File.WriteAllLines(Path.Combine(dir, "raw", RoundRecord.EventsFileName),
+                [new JsonObject { ["type"] = GameEvents.RoundStart, ["utc_ms"] = start, ["event_id"] = 7 }.ToJsonString()]);
+
+            long last = PlayerTimeline.WriteRoundEvents(dir, new RoundRecord("s", "m", "Game", null, 1, start, null, 12300, []));
+
+            var events = File.ReadLines(Path.Combine(dir, "events.jsonl")).Select(l => JsonNode.Parse(l)!.AsObject()).ToList();
+            Assert.Equal(7, last);
+            Assert.Equal(["event_id", "type"], events[0].Select(kv => kv.Key));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
     private static string NewCapture()
     {
         string dir = Path.Combine(Path.GetTempPath(), $"odx-folder-{Guid.NewGuid():N}");

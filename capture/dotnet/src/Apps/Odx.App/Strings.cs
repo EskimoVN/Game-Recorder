@@ -91,6 +91,8 @@ public sealed class Strings
     public required string StartingCapture { get; init; }
     public required Func<TimeSpan, RecorderStatus?, string, string> RecordingStatus { get; init; }
     public required string StoppingStatus { get; init; }
+    public required Func<int, string> FinalizingStatus { get; init; }
+    public required string BuildingStatus { get; init; }
     public required Func<string, string> CouldNotStart { get; init; }
     public required Func<string, string> HotkeyInUse { get; init; }
     public required string PressKeys { get; init; }
@@ -117,6 +119,8 @@ public sealed class Strings
     public required Func<string, string> RoundToggleFailed { get; init; }
     public required Func<string, string> TrayTooltip { get; init; }
     public required string EndOverlay { get; init; }
+    public required Func<int, string> FinalizingOverlay { get; init; }
+    public required string BuildingOverlay { get; init; }
     public required string NotifySavedPass { get; init; }
     public required string NotifySavedRaw { get; init; }
     public required string NotifyFailed { get; init; }
@@ -222,6 +226,8 @@ public sealed class Strings
         RecordingStatus = (elapsed, c, dir) =>
             $"Recording {elapsed:hh\\:mm\\:ss}{(c is { } x ? $" · {x.Frames} frames, {x.Dropped} dropped" : "")}\n→ {dir}",
         StoppingStatus = "Stopping, then building and validating the session…",
+        FinalizingStatus = percent => $"Finalizing the video ({percent} %)…",
+        BuildingStatus = "Building and validating the session…",
         CouldNotStart = error => $"Could not start: {error}",
         HotkeyInUse = hotkey => $"Hotkey {hotkey} is already used by another application; choose another one.",
         PressKeys = "Press a key combination…",
@@ -248,6 +254,8 @@ public sealed class Strings
         RoundToggleFailed = error => $"Could not start/end the round: {error}",
         TrayTooltip = state => $"Odx Capture: {state}",
         EndOverlay = "END",
+        FinalizingOverlay = percent => $"Video {percent} %",
+        BuildingOverlay = "Session…",
         NotifySavedPass = "Recording saved · validation PASS",
         NotifySavedRaw = "Recording saved (raw capture)",
         NotifyFailed = "Recording stopped with errors",
@@ -366,6 +374,8 @@ public sealed class Strings
         RecordingStatus = (elapsed, c, dir) =>
             $"Đang ghi {elapsed:hh\\:mm\\:ss}{(c is { } x ? $" · {x.Frames} khung hình, bỏ {x.Dropped}" : "")}\n→ {dir}",
         StoppingStatus = "Đang dừng, sau đó tạo và kiểm tra session…",
+        FinalizingStatus = percent => $"Đang hoàn thiện video ({percent} %)…",
+        BuildingStatus = "Đang tạo và kiểm tra session…",
         CouldNotStart = error => $"Không thể bắt đầu: {error}",
         HotkeyInUse = hotkey => $"Phím tắt {hotkey} đang được ứng dụng khác dùng; hãy chọn phím khác.",
         PressKeys = "Nhấn tổ hợp phím…",
@@ -392,6 +402,8 @@ public sealed class Strings
         RoundToggleFailed = error => $"Không bắt đầu/kết thúc được round: {error}",
         TrayTooltip = state => $"Odx Capture: {state}",
         EndOverlay = "KẾT THÚC",
+        FinalizingOverlay = percent => $"Video {percent} %",
+        BuildingOverlay = "Session…",
         NotifySavedPass = "Đã lưu bản ghi · Kiểm tra ĐẠT",
         NotifySavedRaw = "Đã lưu bản ghi (dữ liệu thô)",
         NotifyFailed = "Bản ghi có lỗi",
@@ -432,6 +444,23 @@ public sealed class Strings
     };
 
     /// <summary>Title and text of the Windows notification shown when a recording is finished.</summary>
+    /// <summary>The processing badge's text after the round; null once the run is done (the badge closes).</summary>
+    public string? PhaseOverlay(CapturePhase phase, int percent) => phase switch
+    {
+        CapturePhase.Finalizing => FinalizingOverlay(percent),
+        CapturePhase.Building => BuildingOverlay,
+        CapturePhase.Done => null,
+        _ => EndOverlay,
+    };
+
+    /// <summary>The status line while a recording is stopped, finalized and built.</summary>
+    public string PhaseStatus(CapturePhase phase, int percent) => phase switch
+    {
+        CapturePhase.Finalizing => FinalizingStatus(percent),
+        CapturePhase.Building => BuildingStatus,
+        _ => StoppingStatus,
+    };
+
     public (string Title, string Body) Notification(RunResult r) =>
         (!r.Ok ? NotifyFailed : r.Build is null ? NotifySavedRaw : NotifySavedPass, r.SessionDir);
 

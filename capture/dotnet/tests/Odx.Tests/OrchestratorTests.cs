@@ -23,6 +23,9 @@ public sealed class OrchestratorTests : IAsyncLifetime
 {
     internal sealed class FakeCapture : ICaptureRun
     {
+        public CapturePhase Phase => CapturePhase.Recording;
+        public int FinalizePercent => 0;
+        public event Action? PhaseChanged { add { } remove { } }
         private readonly TaskCompletionSource _stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         /// <param name="building">How long the capture takes to build after it is stopped.</param>

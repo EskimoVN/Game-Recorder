@@ -152,7 +152,7 @@ public sealed record Stop(string SessionId, string Reason) : AgentMessage
     public const string Cancelled = "cancelled";
 }
 
-/// <summary>Agent → orchestrator: idle, armed, recording, building, error.</summary>
+/// <summary>Agent → orchestrator: idle, armed, starting, recording, saving (stop to Done), error.</summary>
 public sealed record AgentState(string State, string? Detail = null) : AgentMessage;
 
 /// <summary>

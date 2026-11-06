@@ -451,23 +451,47 @@ public partial class MainWindow : Window
             _clock.Start();
             ShowRecordingStatus();
         }), TaskContinuationOptions.OnlyOnRanToCompletion);
-        // Shown only once both capture tools have exited, so the badge never ends up in the video.
-        run.CaptureStopped.ContinueWith(_ => Dispatcher.Invoke(ShowEndBadge), TaskContinuationOptions.OnlyOnRanToCompletion);
+        // Shown only once the capture has ended, so the badge never ends up in the video.
+        run.CaptureStopped.ContinueWith(_ => Dispatcher.Invoke(() => ShowProcessingBadge(run)), TaskContinuationOptions.OnlyOnRanToCompletion);
+        run.PhaseChanged += () => Dispatcher.BeginInvoke(() => ShowPhaseStatus(run));
         run.Completion.ContinueWith(t => Dispatcher.Invoke(() => OnRunCompleted(t.Result)),
             TaskContinuationOptions.OnlyOnRanToCompletion);
     }
 
-    private void ShowEndBadge()
+    /// <summary>
+    /// "END" in the middle of the screen, then what the recording is doing (finalizing the video with its progress,
+    /// building the session) until the run completes: the player sees the stop is being worked on, not hung.
+    /// </summary>
+    private void ShowProcessingBadge(ICaptureRun run)
     {
         var badge = new CountdownOverlay { Text = _t.EndOverlay };
         badge.Show();
+        void Update()
+        {
+            string? text = _t.PhaseOverlay(run.Phase, run.FinalizePercent);
+            if (text is null) badge.Close();
+            else badge.Text = text;
+        }
         var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1.5) };
         timer.Tick += (_, _) =>
         {
             timer.Stop();
-            badge.Close();
+            Update();
         };
         timer.Start();
+        run.PhaseChanged += () => Dispatcher.BeginInvoke(() =>
+        {
+            if (!timer.IsEnabled) Update();
+        });
+        run.Completion.ContinueWith(_ => Dispatcher.BeginInvoke(badge.Close));
+    }
+
+    /// <summary>The status line follows the phases of a stop (solo recording, or a round in a room).</summary>
+    private void ShowPhaseStatus(ICaptureRun run)
+    {
+        if (_run != run || run.Phase is CapturePhase.Recording or CapturePhase.Done) return;
+        if (_state == RunState.Stopping || (_state == RunState.Agent && _run is not null))
+            SetStatus(t => t.PhaseStatus(run.Phase, run.FinalizePercent));
     }
 
     private void StopRecording()
@@ -514,7 +538,7 @@ public partial class MainWindow : Window
         room.Members.Where(m => m.PlayerId != room.HostPlayerId && !(m.Ready && m.State is "idle" or "armed")).ToList();
 
     /// <summary>Members, the host included, still saving the last round (the orchestrator refuses a new round until they are done).</summary>
-    private static List<RoomMember> Saving(RoomUpdate room) => room.Members.Where(m => m.State is "starting" or "recording").ToList();
+    private static List<RoomMember> Saving(RoomUpdate room) => room.Members.Where(m => m.State is "starting" or "recording" or "saving").ToList();
 
     private void Join_Click(object sender, RoutedEventArgs e)
     {
@@ -767,7 +791,8 @@ public partial class MainWindow : Window
             _clock.Start();
             ShowRecordingStatus();
         });
-        run.CaptureStopped.ContinueWith(_ => Dispatcher.Invoke(ShowEndBadge), TaskContinuationOptions.OnlyOnRanToCompletion);
+        run.CaptureStopped.ContinueWith(_ => Dispatcher.Invoke(() => ShowProcessingBadge(run)), TaskContinuationOptions.OnlyOnRanToCompletion);
+        run.PhaseChanged += () => Dispatcher.BeginInvoke(() => ShowPhaseStatus(run));
         run.Completion.ContinueWith(t => Dispatcher.Invoke(() => OnAgentRunCompleted(t.Result)),
             TaskContinuationOptions.OnlyOnRanToCompletion);
         return run;

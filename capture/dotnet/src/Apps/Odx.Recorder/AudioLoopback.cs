@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.IO.Pipes;
 using System.Runtime.InteropServices;
 using NAudio.CoreAudioApi;
 using NAudio.CoreAudioApi.Interfaces;
@@ -9,18 +8,19 @@ using Odx.Core;
 
 namespace Odx.Recorder;
 
-/// <summary>Raw PCM that the video's ffmpeg reads as its audio input, from a named pipe.</summary>
-internal sealed record AudioInput(string SampleFormat, int SampleRate, int Channels, string Pipe);
+/// <summary>The PCM file (WAV) that VideoFinalize muxes into video.mp4 after the capture, and its format.</summary>
+internal sealed record AudioInput(string SampleFormat, int SampleRate, int Channels, string File);
 
 /// <summary>
 /// Streams what one process tree plays (WASAPI process loopback: the game only, not voice chat, browsers or system
-/// sounds, on whatever device it plays), or else the whole default playback device, as PCM into a named pipe that the
-/// video's ffmpeg muxes into video.mp4, with sample 0 at <see cref="SetOrigin"/> on the QPC clock (the first video grid
-/// tick). Packets are placed by their QPC capture time (<see cref="AudioTimeline"/>), or by their arrival when the
-/// device's times turn out not to be on the QPC clock. WASAPI delivers nothing while nothing plays, so silence is written
-/// up to <see cref="LagMs"/> behind now: the audio keeps pace with the video and ffmpeg never waits for it.
-/// The capture thread only queues bytes; a writer thread owns the pipe, so a stalled ffmpeg never stalls the capture
-/// (WASAPI's buffer would overflow and lose sound). <see cref="Status"/> tells what was recorded and how it went.
+/// sounds, on whatever device it plays), or else the whole default playback device, as PCM into a WAV file
+/// (<see cref="VideoFinalize.AudioFile"/>) with sample 0 at <see cref="SetOrigin"/> on the QPC clock (the first video
+/// grid tick); the finalize step muxes it into video.mp4 once the capture has stopped. Packets are placed by their QPC
+/// capture time (<see cref="AudioTimeline"/>), or by their arrival when the device's times turn out not to be on the QPC
+/// clock. WASAPI delivers nothing while nothing plays, so silence is written up to <see cref="LagMs"/> behind now. The
+/// capture thread only queues bytes; a writer thread owns the file, so a slow disk never stalls the capture (WASAPI's
+/// buffer would overflow and lose sound). Nothing here waits on a reader: no pipe to ffmpeg, no drops, and every wait
+/// in <see cref="Finish"/> is bounded. <see cref="Status"/> tells what was recorded and how it went.
 /// </summary>
 internal sealed class AudioLoopback : IDisposable
 {
@@ -34,14 +34,12 @@ internal sealed class AudioLoopback : IDisposable
     // the build OBS's and GStreamer's process capture require; gating on 20348 sent every Windows 10 PC to the device
     // fallback, voice chat included (test of 2026-11-06).
     private const int ProcessLoopbackMinBuild = 19041;
-    private const int QueuedChunks = 4096;        // ~40 s of 10 ms packets, or 4096 s of 1 s silence chunks
     private const double SilentDbfs = -60;
 
     private readonly AudioClient _client;
     private readonly AudioCaptureClient _capture;
-    private readonly NamedPipeServerStream _pipe;
-    private readonly Task _connected;
-    private readonly BlockingCollection<byte[]> _queue = new(QueuedChunks);
+    private readonly WavWriter _file;
+    private readonly BlockingCollection<byte[]> _queue = new();
     private readonly Thread _thread, _writer;
     private readonly AutoResetEvent _packetReady = new(false);
     private readonly List<(byte[] Data, double QpcMs, bool Silent)> _early = [];
@@ -52,7 +50,7 @@ internal sealed class AudioLoopback : IDisposable
     private volatile bool _stopping;
     private string? _timing;
     private double? _qpcOffsetMs;
-    private long _packets, _discontinuities, _droppedBytes, _silentFrames;
+    private long _packets, _discontinuities, _silentFrames;
     private double _peak;
 
     public AudioInput Input { get; }
@@ -61,12 +59,13 @@ internal sealed class AudioLoopback : IDisposable
     /// <summary>The playback device recorded; null when only the game process is.</summary>
     public string? Device { get; }
     public double? OriginMs => _timeline.OriginMs;
-    /// <summary>Why audio stopped being written (ffmpeg closed the pipe or never opened it).</summary>
+    /// <summary>Why audio stopped being written (the file could not be written) or did not end cleanly.</summary>
     public string? Error { get; private set; }
 
     /// <param name="processId">The game's process; processes it starts are included.</param>
+    /// <param name="file">The WAV to write.</param>
     /// <exception cref="NotSupportedException">Windows is older than 10 2004 (build 19041), which added process loopback.</exception>
-    public AudioLoopback(int processId)
+    public AudioLoopback(int processId, string file)
     {
         if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, ProcessLoopbackMinBuild))
             throw new NotSupportedException("recording only the game's audio needs Windows 10 2004 (build 19041) or newer");
@@ -81,14 +80,15 @@ internal sealed class AudioLoopback : IDisposable
             BufferHns, 0, format, Guid.Empty);
         _client.SetEventHandle(_packetReady.SafeWaitHandle.DangerousGetHandle());
         _capture = _client.AudioCaptureClient;
-        (_pipe, _connected, Input) = OpenPipe("f32le", format);
+        (_file, Input) = OpenFile(file, "f32le", format, _float);
         _timeline = new AudioTimeline(format.SampleRate, QpcToleranceMs);
         (_thread, _writer) = Threads();
     }
 
     /// <summary>Everything the default playback device plays (voice chat and other apps included); polled every 10 ms.</summary>
+    /// <param name="file">The WAV to write.</param>
     /// <exception cref="NotSupportedException">The device's mix format is neither 32-bit float nor 16-bit PCM.</exception>
-    public AudioLoopback()
+    public AudioLoopback(string file)
     {
         using var enumerator = new MMDeviceEnumerator();
         using var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
@@ -105,22 +105,19 @@ internal sealed class AudioLoopback : IDisposable
         _float = sampleFormat == "f32le";
         _client.Initialize(AudioClientShareMode.Shared, AudioClientStreamFlags.Loopback, BufferHns, 0, format, Guid.Empty);
         _capture = _client.AudioCaptureClient;
-        (_pipe, _connected, Input) = OpenPipe(sampleFormat, format);
+        (_file, Input) = OpenFile(file, sampleFormat, format, _float);
         _timeline = new AudioTimeline(format.SampleRate, QpcToleranceMs);
         (_thread, _writer) = Threads();
     }
 
     private (Thread Capture, Thread Writer) Threads() =>
         (new Thread(Run) { IsBackground = true, Name = "audio loopback" },
-         new Thread(WritePipe) { IsBackground = true, Name = "audio pipe" });
+         new Thread(WriteFile) { IsBackground = true, Name = "audio file" });
 
-    private static (NamedPipeServerStream, Task, AudioInput) OpenPipe(string sampleFormat, WaveFormat format)
-    {
-        string name = "odx-audio-" + Guid.NewGuid().ToString("N");
-        var pipe = new NamedPipeServerStream(name, PipeDirection.Out, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous,
-            inBufferSize: 0, outBufferSize: 1 << 20);
-        return (pipe, pipe.WaitForConnectionAsync(), new AudioInput(sampleFormat, format.SampleRate, format.Channels, @"\\.\pipe\" + name));
-    }
+    private static (WavWriter, AudioInput) OpenFile(string path, string sampleFormat, WaveFormat format, bool isFloat) =>
+        (new WavWriter(new FileStream(path, FileMode.Create, FileAccess.ReadWrite, FileShare.Read, 1 << 16), format.SampleRate,
+            format.Channels, format.BitsPerSample, isFloat),
+         new AudioInput(sampleFormat, format.SampleRate, format.Channels, path));
 
     private static readonly Guid SubtypeIeeeFloat = new("00000003-0000-0010-8000-00aa00389b71");  // KSDATAFORMAT_SUBTYPE_IEEE_FLOAT
 
@@ -141,11 +138,11 @@ internal sealed class AudioLoopback : IDisposable
         lock (_gate) _timeline.SetOrigin(qpcMs);
     }
 
-    /// <summary>Pads to <paramref name="stopQpcMs"/> and closes the pipe, so ffmpeg sees the audio end.</summary>
+    /// <summary>Pads to <paramref name="stopQpcMs"/> and closes the file. Bounded: a stop never hangs on audio.</summary>
     public void Finish(double stopQpcMs)
     {
         _stopping = true;
-        _thread.Join();
+        if (!_thread.Join(TimeSpan.FromSeconds(2))) Error ??= "audio capture thread did not stop within 2 s";
         _client.Stop();
         lock (_gate)
         {
@@ -154,10 +151,7 @@ internal sealed class AudioLoopback : IDisposable
             Enqueue(Silence(_timeline.SilenceTo(stopQpcMs)));
         }
         _queue.CompleteAdding();
-        // A writer still blocked in Write holds the pipe open whatever Dispose does: the pipe closes once ffmpeg, which
-        // stopped reading it, has exited or been killed (Dispose).
-        if (_writer.Join(TimeSpan.FromSeconds(10))) _pipe.Dispose();
-        else Error ??= "ffmpeg stopped reading the audio pipe";
+        if (!_writer.Join(TimeSpan.FromSeconds(5))) Error ??= "audio file not written out within 5 s";
     }
 
     /// <summary>What is being recorded, and the counters so far (final after <see cref="Finish"/>).</summary>
@@ -167,7 +161,7 @@ internal sealed class AudioLoopback : IDisposable
         {
             long written = _timeline.FramesWritten;
             return new AudioStatus(ProcessId is null ? AudioStatus.FromDevice : AudioStatus.FromProcess, ProcessId, Device, fallbackReason,
-                Error, _timing, _packets, _discontinuities, _timeline.PaddedFrames, _timeline.TrimmedFrames, _droppedBytes,
+                Error, _timing, _packets, _discontinuities, _timeline.PaddedFrames, _timeline.TrimmedFrames,
                 _packets == 0 ? null : Math.Round(Dbfs(_peak), 1),
                 written == 0 ? null : Math.Round((double)Math.Min(written, _silentFrames + _timeline.PaddedFrames) / written, 4),
                 _qpcOffsetMs is double q ? Math.Round(q, 1) : null);
@@ -271,35 +265,25 @@ internal sealed class AudioLoopback : IDisposable
         foreach (var chunk in chunks) Enqueue(chunk);
     }
 
-    /// <summary>Queues for the writer; when it is a whole queue behind, the oldest chunk goes (counted) so capture never blocks.</summary>
+    /// <summary>Queues for the writer; the queue is unbounded, so the capture thread never waits on the disk.</summary>
     private void Enqueue(byte[] chunk)
     {
         if (chunk.Length == 0 || _queue.IsAddingCompleted) return;
-        while (!_queue.TryAdd(chunk))
-        {
-            if (_queue.TryTake(out var dropped)) _droppedBytes += dropped.Length;
-        }
+        _queue.Add(chunk);
     }
 
-    private void WritePipe()
+    private void WriteFile()
     {
-        // ffmpeg opens the pipe once it starts, with the first video frame; the queue holds the sound until then.
-        if (!_connected.Wait(TimeSpan.FromSeconds(30)))
-        {
-            Error = "ffmpeg did not open the audio pipe";
-            foreach (var _ in _queue.GetConsumingEnumerable()) { }
-            return;
-        }
         foreach (var chunk in _queue.GetConsumingEnumerable())
         {
-            if (Error is not null) continue;  // drain, so the capture thread's queue never fills for nothing
+            if (Error is not null) continue;  // drain, so the capture thread's queue does not grow for nothing
             try
             {
-                _pipe.Write(chunk, 0, chunk.Length);
+                _file.Write(chunk);
             }
-            catch (IOException e)
+            catch (Exception e) when (e is IOException or ObjectDisposedException or UnauthorizedAccessException)
             {
-                Error = $"audio pipe closed: {e.Message}";
+                Error = $"audio file: {e.Message}";
             }
         }
     }
@@ -308,7 +292,7 @@ internal sealed class AudioLoopback : IDisposable
     {
         _queue.CompleteAdding();
         _client.Dispose();
-        _pipe.Dispose();
+        _file.Dispose();
         _packetReady.Dispose();
         _queue.Dispose();
     }

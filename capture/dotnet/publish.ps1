@@ -92,15 +92,23 @@ $ffmpegDir = Join-Path $bin 'ffmpeg'
 New-Item -ItemType Directory -Force $ffmpegDir | Out-Null
 Copy-Item (Join-Path $ffmpegBuild '*') $ffmpegDir
 
-# Smoke test: odx record encodes raw NV12 into an MP4, and odx record --obs remuxes a recording (here that MP4).
+# Smoke test: odx record encodes raw NV12 into a fragmented MP4, VideoFinalize copies it with a WAV into an MP4, and
+# odx record --obs remuxes a recording.
 $smoke = Join-Path ([IO.Path]::GetTempPath()) "odx-ffmpeg-smoke-$PID"
 New-Item -ItemType Directory -Force $smoke | Out-Null
 try {
     $ffmpegExe = Join-Path $ffmpegDir 'ffmpeg.exe'
     [IO.File]::WriteAllBytes("$smoke\frames.nv12", (New-Object byte[] (64 * 64 * 3 / 2 * 10)))
-    & $ffmpegExe -v error -y -f rawvideo -pix_fmt nv12 -s 64x64 -framerate 30 -i "$smoke\frames.nv12" -c:v libx264 "$smoke\a.mp4"
-    if ($LASTEXITCODE -ne 0) { throw 'bundled ffmpeg cannot encode raw NV12 to MP4' }
-    & $ffmpegExe -v error -y -i "$smoke\a.mp4" -map 0:v:0 -c copy -movflags +faststart "$smoke\b.mp4"
+    & $ffmpegExe -v error -y -f rawvideo -pix_fmt nv12 -s 64x64 -framerate 30 -i "$smoke\frames.nv12" -c:v libx264 `
+        -movflags +frag_keyframe+empty_moov+default_base_moof -f mp4 "$smoke\a.mp4"
+    if ($LASTEXITCODE -ne 0) { throw 'bundled ffmpeg cannot encode raw NV12 to a fragmented MP4 (odx record)' }
+    # A 44-byte PCM WAV header + 10 ms of silence, as odx record's audio.wav (16-bit here; the float variant adds cbSize).
+    $wav = [byte[]](0x52,0x49,0x46,0x46, 0xA4,0x07,0,0, 0x57,0x41,0x56,0x45, 0x66,0x6D,0x74,0x20, 16,0,0,0, 1,0, 2,0,
+        0x80,0xBB,0,0, 0,0xEE,0x02,0, 4,0, 16,0, 0x64,0x61,0x74,0x61, 0x80,0x07,0,0) + (New-Object byte[] 1920)
+    [IO.File]::WriteAllBytes("$smoke\a.wav", $wav)
+    & $ffmpegExe -v error -y -i "$smoke\a.mp4" -i "$smoke\a.wav" -map 0:v:0 -map 1:a:0 -c:v copy -c:a aac -movflags +faststart -f mp4 "$smoke\b.mp4"
+    if ($LASTEXITCODE -ne 0) { throw 'bundled ffmpeg cannot finalize a fragmented MP4 with a WAV (VideoFinalize)' }
+    & $ffmpegExe -v error -y -i "$smoke\b.mp4" -map 0:v:0 -c copy -movflags +faststart "$smoke\c.mp4"
     if ($LASTEXITCODE -ne 0) { throw 'bundled ffmpeg cannot remux an MP4 (odx record --obs)' }
 }
 finally {

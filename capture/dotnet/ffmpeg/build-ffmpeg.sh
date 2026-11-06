@@ -57,7 +57,7 @@ CONFIGURE=(
     --disable-ffplay --disable-ffprobe
     --enable-gpl --enable-libx264 --enable-ffnvcodec --enable-nvenc --enable-mediafoundation --enable-d3d11va  # mfenc.c needs d3d11va
     --enable-encoder=libx264,h264_nvenc,h264_mf,aac
-    --enable-demuxer=rawvideo,pcm_f32le,pcm_s16le --enable-decoder=rawvideo,pcm_f32le,pcm_s16le
+    --enable-demuxer=rawvideo,pcm_f32le,pcm_s16le,wav --enable-decoder=rawvideo,pcm_f32le,pcm_s16le  # wav: audio.wav (VideoFinalize)
     --enable-demuxer=mov,matroska,flv,mpegts --enable-parser=h264,hevc,av1,aac,opus --enable-bsf=aac_adtstoasc
     --enable-decoder=aac  # MPEG-TS gives AAC's sample rate only once a frame is decoded
     --enable-muxer=mp4 --enable-protocol=file,pipe,fd  # ffmpeg 9 reads '-i -' through fd:, not pipe:

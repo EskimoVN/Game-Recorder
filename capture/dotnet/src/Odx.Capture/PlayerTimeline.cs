@@ -54,8 +54,9 @@ public static class PlayerTimeline
     /// with the fields of the client's multiplayer delivery: when the event's notice reached this machine
     /// (local_receive_utc, local_receive_time_us; absent when it never did) and the server time on this machine's clock
     /// (server_time_as_local_us, from player.json's offset). Fields are in the sample's order, its times to the microsecond,
-    /// without the orchestrator's utc_ms or a frame_index. Without clock samples against the time service the events are
-    /// written without video times.
+    /// without the orchestrator's utc_ms or a frame_index. Without clock samples against the time service, or when the
+    /// recording did not stop properly (no raw/recording.json, which odx record writes last: a killed odx record leaves a
+    /// truncated video_frames.csv), the events are written without video times.
     /// </summary>
     /// <param name="receipts">When each event's notice arrived on this machine's Windows clock (Unix ms), by event_id.</param>
     /// <returns>The highest event_id of the round; 0 without events.</returns>
@@ -64,7 +65,8 @@ public static class PlayerTimeline
         string serverEvents = CaptureFolder.Raw(captureDir, RoundRecord.EventsFileName);
         if (!File.Exists(serverEvents)) return 0;
         var events = File.ReadLines(serverEvents).Where(l => l.Length > 0).Select(l => JsonNode.Parse(l)!.AsObject()).ToList();
-        var frameUtc = ServerClock(captureDir, round.TimePort) is { } clock ? FrameUtc(captureDir, clock.Map) : null;
+        bool recorded = File.Exists(CaptureFolder.Raw(captureDir, "recording.json"));
+        var frameUtc = recorded && ServerClock(captureDir, round.TimePort) is { } clock ? FrameUtc(captureDir, clock.Map) : null;
         double? offsetMs = PlayerFile.OffsetMs(captureDir);
         long last = 0;
         WriteEvents(Path.Combine(captureDir, "events.jsonl"), events.Select(e =>

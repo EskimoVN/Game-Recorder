@@ -490,6 +490,8 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
                 Log?.Invoke($"stop {s.SessionId} ({s.Reason})");
                 lock (_gate) _stopReason = s.Reason;
                 StopCapture();
+                // Saving (stop, finalize, build) until Done: the host sees who the next round waits for.
+                await SendAsync(new AgentState("saving", s.SessionId), stop);
                 break;
         }
     }

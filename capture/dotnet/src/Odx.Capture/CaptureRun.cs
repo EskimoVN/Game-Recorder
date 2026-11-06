@@ -36,30 +36,48 @@ public sealed record RunResult(string SessionDir, bool CaptureOk, RecorderStatus
 /// <param name="Error">Why the session could not be built; null when it was built and validated.</param>
 public sealed record BuildResult(BuildReport? Report, IReadOnlyList<Issue> Issues, string? Error);
 
+/// <summary>Where a recording stands after the stop was asked for, for the player's processing screen.</summary>
+public enum CapturePhase { Recording, Stopping, Finalizing, Building, Done }
+
 /// <summary>One recording in progress; the agent and odx-app drive it, tests substitute a fake.</summary>
 public interface ICaptureRun
 {
     string SessionDir { get; }
     Task Started { get; }
+    /// <summary>Completes once the capture itself has ended (the recorder reported stopped, or both tools exited).</summary>
     Task CaptureStopped { get; }
     Task<RunResult> Completion { get; }
+    CapturePhase Phase { get; }
+    /// <summary>Of the finalize phase: frames muxed into video.mp4 so far, out of the frames recorded (0 before).</summary>
+    int FinalizePercent { get; }
+    /// <summary>Raised off the caller's thread when <see cref="Phase"/> or <see cref="FinalizePercent"/> changes.</summary>
+    event Action? PhaseChanged;
     void Stop();
 }
 
 /// <summary>
 /// One recording: `odx input` and `odx record` run as child processes into the same session folder, both stopped through
 /// a shared named event. If either child exits on its own (error, captured window closed), the other is stopped too.
-/// After a clean stop the folder is built into a spec v2 session with the chosen game profile and validated, then tidied
-/// (<see cref="CaptureFolder"/>): the delivered files at the top, the raw logs in raw/.
+/// The recorder stops its capture (status stopped) and then finalizes the video (video_raw.mp4 + audio.wav → video.mp4,
+/// status finalizing/finalized); each gets its own time limit, and a recorder killed in either leaves a capture that
+/// <see cref="VideoFinalize.RunIfNeeded"/> turns into a video here. After a clean stop the folder is built into a spec v2
+/// session with the chosen game profile and validated, then tidied (<see cref="CaptureFolder"/>): the delivered files at
+/// the top, the raw logs in raw/.
 /// </summary>
 public sealed class CaptureRun : ICaptureRun
 {
-    private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(60);  // ffmpeg may still be draining frames
+    /// <summary>Until the recorder reports stopped: its own limits add up to ~31 s (RecordCommand), so this never wins.</summary>
+    private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(60);
+    /// <summary>Added to the finalize's own limit (<see cref="VideoFinalize.Limit"/>) before the recorder is killed.</summary>
+    private static readonly TimeSpan FinalizeMargin = TimeSpan.FromSeconds(30);
 
     private readonly EventWaitHandle _stop;
     private readonly List<string> _stderr = [];
     private readonly TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource _captureStopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource<RecorderStatus?> _recorderStopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private volatile CapturePhase _phase = CapturePhase.Recording;
+    private volatile int _finalizePercent;
     private readonly string? _gameProfile;
     private readonly PlayerIdentity? _player;
     /// <summary>The round's session id when the agent runs this capture (its DirName); null for a capture outside a room.</summary>
@@ -75,6 +93,9 @@ public sealed class CaptureRun : ICaptureRun
     /// <summary>Latest odx record status (frame counters update every second); null before capture starts.</summary>
     public RecorderStatus? LastStatus => Volatile.Read(ref _lastStatus);
     public Task<RunResult> Completion { get; }
+    public CapturePhase Phase => _phase;
+    public int FinalizePercent => _finalizePercent;
+    public event Action? PhaseChanged;
 
     private CaptureRun(CaptureOptions options)
     {
@@ -118,8 +139,28 @@ public sealed class CaptureRun : ICaptureRun
             record = Launch("record", recordArgs, env: options.Obs?.Password, onStdout: line =>
             {
                 if (RecorderStatus.TryParse(line) is not { } status) return;
-                Volatile.Write(ref _lastStatus, status);
-                if (status.Event == RecorderStatus.Started) _started.TrySetResult();
+                switch (status.Event)
+                {
+                    case RecorderStatus.Started:
+                        Volatile.Write(ref _lastStatus, status);
+                        _started.TrySetResult();
+                        break;
+                    case RecorderStatus.Stopped:
+                        Volatile.Write(ref _lastStatus, status);
+                        _recorderStopped.TrySetResult(status);
+                        _captureStopped.TrySetResult();
+                        SetPhase(CapturePhase.Finalizing, 0);
+                        break;
+                    case RecorderStatus.Finalizing:
+                        long total = LastStatus?.Frames ?? 0;
+                        SetPhase(CapturePhase.Finalizing, total > 0 ? (int)Math.Clamp(status.Frames * 100 / total, 0, 100) : 0);
+                        break;
+                    case RecorderStatus.Finalized:
+                        break;  // the exit code and recording.json carry the result
+                    default:
+                        Volatile.Write(ref _lastStatus, status);
+                        break;
+                }
             });
         }
         catch
@@ -164,7 +205,19 @@ public sealed class CaptureRun : ICaptureRun
         }
     }
 
-    public void Stop() => _stop.Set();
+    public void Stop()
+    {
+        if (_phase == CapturePhase.Recording) SetPhase(CapturePhase.Stopping, 0);
+        _stop.Set();
+    }
+
+    private void SetPhase(CapturePhase phase, int percent)
+    {
+        if (_phase == phase && _finalizePercent == percent) return;
+        _phase = phase;
+        _finalizePercent = percent;
+        PhaseChanged?.Invoke();
+    }
 
     /// <param name="env">The OBS password, passed in the environment so that no other process sees it on a command line.</param>
     private Process Launch(string command, IEnumerable<string> args, string? env = null, Action<string>? onStdout = null)
@@ -196,32 +249,62 @@ public sealed class CaptureRun : ICaptureRun
 
     private async Task<RunResult> WaitAsync(Process input, Process record)
     {
-        await Task.WhenAny(input.WaitForExitAsync(), record.WaitForExitAsync());
+        var recordExited = record.WaitForExitAsync();
+        await Task.WhenAny(input.WaitForExitAsync(), recordExited, _recorderStopped.Task);
         _stop.Set();
-        using var timeout = new CancellationTokenSource(StopTimeout);
+        if (_phase == CapturePhase.Recording) SetPhase(CapturePhase.Stopping, 0);
         string? failure = null;
-        try
+        // 1. The capture stops: odx input exits, odx record reports stopped (or exits, when it failed earlier).
+        using (var timeout = new CancellationTokenSource(StopTimeout))
         {
-            await Task.WhenAll(input.WaitForExitAsync(timeout.Token), record.WaitForExitAsync(timeout.Token));
-        }
-        catch (OperationCanceledException)
-        {
-            foreach (var (name, p) in new[] { ("odx input", input), ("odx record", record) })
+            try
             {
-                if (p.HasExited) continue;
-                p.Kill();
-                string last = p == record && LastStatus is { } s ? $" (last status: {s.Event}, {s.Frames} frames)" : "";
-                failure ??= $"{name} did not stop within {StopTimeout.TotalSeconds:0} s{last}; killed";
-                lock (_stderr) _stderr.Add(failure);
+                await Task.WhenAll(input.WaitForExitAsync(timeout.Token),
+                    Task.WhenAny(recordExited, _recorderStopped.Task).WaitAsync(timeout.Token));
+            }
+            catch (OperationCanceledException)
+            {
+                foreach (var (name, p) in new[] { ("odx input", input), ("odx record", record) })
+                {
+                    if (p.HasExited) continue;
+                    p.Kill(entireProcessTree: true);
+                    string last = p == record && LastStatus is { } s ? $" (last status: {s.Event}, {s.Frames} frames)" : "";
+                    failure ??= $"{name} did not stop within {StopTimeout.TotalSeconds:0} s{last}; killed";
+                    lock (_stderr) _stderr.Add(failure);
+                }
             }
         }
         _stop.Dispose();
         _captureStopped.TrySetResult();
+        // 2. The recorder finalizes the video (its own limit, VideoFinalize.Limit); a margin on top, then it is killed.
+        if (!record.HasExited)
+        {
+            var status0 = _recorderStopped.Task.IsCompletedSuccessfully ? _recorderStopped.Task.Result : null;
+            double seconds = status0 is { Fps: > 0 } st ? st.Frames / st.Fps : 0;
+            using var timeout = new CancellationTokenSource(VideoFinalize.Limit(seconds) + FinalizeMargin);
+            try
+            {
+                await recordExited.WaitAsync(timeout.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                record.Kill(entireProcessTree: true);
+                failure ??= $"odx record did not finish the video within {(VideoFinalize.Limit(seconds) + FinalizeMargin).TotalSeconds:0} s; killed";
+                lock (_stderr) _stderr.Add(failure);
+            }
+        }
+        await recordExited;
 
         bool captureOk = input.ExitCode == 0 && record.ExitCode == 0;
         var status = LastStatus is { Event: RecorderStatus.Stopped } stopped ? stopped : null;
         if (!captureOk)
-            failure ??= status?.Error ?? (record.ExitCode != 0 ? $"odx record exited with {record.ExitCode}" : $"odx input exited with {input.ExitCode}");
+            failure ??= status?.Error ?? FinalizeError() ?? (record.ExitCode != 0 ? $"odx record exited with {record.ExitCode}" : $"odx input exited with {input.ExitCode}");
+        // A recorder killed before it could finalize (or that crashed) still leaves a playable video.
+        if (VideoFinalize.RunIfNeeded(SessionDir, ExternalTools.Ffmpeg(), n => SetPhase(CapturePhase.Finalizing,
+                status is { Frames: > 0 } ? (int)Math.Clamp(n * 100 / status.Frames, 0, 100) : 0)) is { } late)
+            lock (_stderr) _stderr.Add(late.Ok
+                ? $"video finalized by the capture host: {late.Frames} frames{(late.HasAudio ? " with sound" : "")}, {late.ElapsedMs} ms"
+                : $"video not finalized: {late.Error}");
         string inputCsv = Path.Combine(SessionDir, "input_events.csv");
         int inputEvents = File.Exists(inputCsv) ? Math.Max(0, File.ReadLines(inputCsv).Count() - 1) : 0;
         if (_reforgerDir is not null &&
@@ -229,6 +312,7 @@ public sealed class CaptureRun : ICaptureRun
             lock (_stderr) _stderr.Add(warning);
         List<string> errors;
         lock (_stderr) errors = [.. _stderr];
+        SetPhase(CapturePhase.Building, 100);
         var build = captureOk ? BuildSession() : null;
         try
         {
@@ -238,7 +322,25 @@ public sealed class CaptureRun : ICaptureRun
         {
             errors.Add($"raw logs not moved into {CaptureFolder.RawDir}/: {e.Message}");
         }
-        return new RunResult(SessionDir, captureOk, status, inputEvents, errors, build, failure);
+        var result = new RunResult(SessionDir, captureOk, status, inputEvents, errors, build, failure);
+        SetPhase(CapturePhase.Done, 100);
+        return result;
+    }
+
+    /// <summary>recording.json → finalize → error, when the recorder's exit code comes from a failed finalize.</summary>
+    private string? FinalizeError()
+    {
+        string path = Path.Combine(SessionDir, "recording.json");
+        if (!File.Exists(path)) return null;
+        try
+        {
+            return System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))?["finalize"]?["error"]?.GetValue<string>() is { } e
+                ? $"video not finalized: {e}" : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     /// <summary>Null without a profile; an unreadable profile is reported when the session is built.</summary>

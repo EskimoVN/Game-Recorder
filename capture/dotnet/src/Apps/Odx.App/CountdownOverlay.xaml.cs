@@ -2,7 +2,7 @@ using System.Windows;
 
 namespace Odx.App;
 
-/// <summary>The countdown and "END" in the middle of the screen (<see cref="Overlay"/>).</summary>
+/// <summary>The countdown, "END" and the processing phases after it in the middle of the screen (<see cref="Overlay"/>).</summary>
 public partial class CountdownOverlay : Window
 {
     public CountdownOverlay() => InitializeComponent();
@@ -17,7 +17,7 @@ public partial class CountdownOverlay : Window
         set
         {
             Number.Text = value;
-            Number.FontSize = value.Length <= 2 ? 110 : 64;
+            Number.FontSize = value.Length <= 2 ? 110 : value.Length <= 10 ? 64 : 44;
         }
     }
 
