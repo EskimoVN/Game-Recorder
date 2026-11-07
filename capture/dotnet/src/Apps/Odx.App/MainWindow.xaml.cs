@@ -664,7 +664,7 @@ public partial class MainWindow : Window
         {
             if (_room != room) return;
             bool ok = result.CaptureOk;
-            string dir = RenameRetakeFolder(result.SessionDir);
+            string dir = result.SessionDir;
             _roundResult = ok ? t => t.RoundKept(session, dir) : t => t.RoundCaptureFailed(session, dir);
             ToastOverlay.Notify(ok, _roundResult(_t));
             if (_run is null) ShowAgentStatus();
@@ -694,6 +694,8 @@ public partial class MainWindow : Window
             SetState(_state);
             if (_run is null) ShowAgentStatus();
         });
+        // Only once the round's files are in the folder (round_record), so a retake's folder can take its task's name.
+        agent.RoundFilesKept += (_, dir) => Dispatcher.BeginInvoke(() => RenameRetakeFolder(dir));
         agent.RoomError += error => Dispatcher.BeginInvoke(() =>
         {
             if (_room != room) return;

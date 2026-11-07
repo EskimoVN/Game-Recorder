@@ -52,7 +52,14 @@ public partial class App : Application
     /// <summary>Into the app's daily log (data\logs), and on screen.</summary>
     private static void Report(string what, Exception ex)
     {
-        new Odx.Core.DailyLogFile(Odx.Core.PackageFolders.Logs).Write($"{what}: {ex}");
+        try
+        {
+            new Odx.Core.DailyLogFile(Odx.Core.PackageFolders.Logs).Write($"{what}: {ex}");
+        }
+        catch (Exception e) when (e is System.IO.IOException or UnauthorizedAccessException)
+        {
+            // The dialog below still shows the error.
+        }
         MessageBox.Show($"Odx Capture: {what}\n\n{ex.Message}\n\nDetails: {Odx.Core.PackageFolders.Logs}",
             "Odx Capture - error", MessageBoxButton.OK, MessageBoxImage.Error);
     }
