@@ -400,7 +400,7 @@ public partial class MainWindow : Window
         // In a room the orchestrator's game profile and frame rate apply.
         GameLabel.Visibility = GameBox.Visibility = FpsLabel.Visibility = FpsBox.Visibility = inRoom ? Visibility.Collapsed : Visibility.Visible;
         RefreshButton.IsEnabled = idle;
-        _tray.Text = idle ? "Odx Capture" : _t.TrayTooltip(_trayStartStop.Text);
+        _tray.Text = idle ? "Dango Capture" : _t.TrayTooltip(_trayStartStop.Text);
     }
 
     private void BeginCountdown()

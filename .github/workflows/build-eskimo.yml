@@ -63,7 +63,7 @@ jobs:
           Odx Capture $env:VERSION (Eskimo), built from $env:BASE_TAG with the patch on branch ${{ github.ref_name }} ($env:GITHUB_SHA).
 
           - odx-capture-$env:VERSION-win-x64.zip: full package, same layout as the official one. Unzip and run "Odx Capture.exe" as administrator.
-          - odx-capture-$env:VERSION-update.zip: for a machine with the official package: unzip into its folder and replace (bin\odx-app.exe, bin\odx.exe only).
+          - odx-capture-$env:VERSION-update.zip: for a machine with the official package: unzip into its folder and replace (Odx Capture.exe, bin\odx-app.exe, bin\odx.exe only).
 
           The game launcher stays OdxReforger.exe from the official releases.
           "@
