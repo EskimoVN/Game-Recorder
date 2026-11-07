@@ -10,9 +10,13 @@ public sealed record ServerClock(string Server, double OffsetMs, double RttMs, d
 /// <param name="StopReason">"round_end", "permanent_death" or "abort"; null while recording.</param>
 /// <param name="StopUtcMs">Server UTC when this player's recording was stopped.</param>
 /// <param name="SteamId">The Steam account the player was signed in with (SteamID64), which the game server's state names.</param>
+/// <param name="Report">The recording's numbers (<see cref="Done.Report"/>); null from an agent that sent none.</param>
+/// <param name="Verdict"><see cref="CaptureReport.Ok"/>, <see cref="CaptureReport.Degraded"/> or <see cref="CaptureReport.Failed"/>:
+/// whether the host should record the round again for this player. Null while not done.</param>
+/// <param name="Problems">The report's problems, one line each; empty when ok.</param>
 public sealed record RoundPlayer(string PlayerId, string Name, string? StopReason = null, double? StopUtcMs = null,
     bool Done = false, bool Kept = false, string? Error = null, string? ToolVersion = null, string? MachineId = null,
-    string? SteamId = null);
+    string? SteamId = null, CaptureReport? Report = null, string? Verdict = null, List<string>? Problems = null);
 
 /// <summary>
 /// One round as the orchestrator saw it (staging round.json). One round = one session (spec v3 §1: task boundaries are

@@ -21,7 +21,7 @@ internal sealed class FfmpegEncoder : IDisposable
         Encoder = encoder;
         string codec = encoder switch
         {
-            "nvenc" => "-c:v h264_nvenc -preset p4 -rc vbr -cq 23 -bf 0 -g 120",
+            "nvenc" => "-c:v h264_nvenc -preset p1 -rc vbr -cq 23 -bf 0 -g 120",  // p1: the fastest; a GPU the game saturates encodes slowly (Bảo, 2026-11-07)
             "x264" => "-c:v libx264 -preset veryfast -crf 20 -bf 0 -g 120",
             // Media Foundation's hardware H.264 encoder: Intel Quick Sync, AMD or NVIDIA, whichever GPU has one.
             "mf" => "-c:v h264_mf -hw_encoding 1 -rate_control quality -quality 70 -bf 0 -g 120",

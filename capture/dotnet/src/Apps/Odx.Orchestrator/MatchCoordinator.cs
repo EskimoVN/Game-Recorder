@@ -60,7 +60,9 @@ public sealed partial class MatchCoordinator(OrchestratorOptions options, int ti
         {
             case AgentState s:
                 link.State = s.State;
-                log.LogInformation("agent {Player}: {State} {Detail}", link.Id, s.State, s.Detail);
+                link.Problem = s.State is "recording" or "saving" ? s.Problem : null;
+                if (s.Problem is not null) log.LogWarning("agent {Player}: {State} {Detail}: {Problem}", link.Id, s.State, s.Detail, s.Problem);
+                else log.LogInformation("agent {Player}: {State} {Detail}", link.Id, s.State, s.Detail);
                 if (room is not null) effects.Changed.Add(room);
                 break;
             case CreateRoom:
@@ -191,6 +193,7 @@ public sealed partial class MatchCoordinator(OrchestratorOptions options, int ti
             ["name"] = a.Hello.Name,
             ["version"] = a.Hello.ToolVersion,
             ["state"] = a.State,
+            ["problem"] = a.Problem,
             ["ready"] = a.Ready,
         }).ToArray()),
         ["sessions"] = new JsonArray(room.Recorded.Select(r => (JsonNode)new JsonObject
@@ -208,7 +211,7 @@ public sealed partial class MatchCoordinator(OrchestratorOptions options, int ti
             updates = effects.Changed.Where(r => _rooms.ContainsKey(r.Code)).SelectMany(r =>
             {
                 var update = new RoomUpdate(r.Code, r.HostPlayerId,
-                    r.Members.Select(a => new RoomMember(a.Id, a.Hello.Name, a.Ready, a.State)).ToList(),
+                    r.Members.Select(a => new RoomMember(a.Id, a.Hello.Name, a.Ready, a.State, a.Problem)).ToList(),
                     r.Current?.Record.SessionId, r.Current?.Counting ?? false, r.LanNetworkId);
                 return r.Members.Select(a => (a, (AgentMessage)update));
             }).ToList();

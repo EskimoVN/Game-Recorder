@@ -26,11 +26,20 @@ public sealed class OrchestratorTests : IAsyncLifetime
         public CapturePhase Phase => CapturePhase.Recording;
         public int FinalizePercent => 0;
         public event Action? PhaseChanged { add { } remove { } }
+        public string? Problem => null;
+        public event Action<string?>? ProblemChanged { add { } remove { } }
         private readonly TaskCompletionSource _stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        /// <summary>What the agent passed in: the round's start (Start.StartUtcMs) and, at Stop, its end, by player.</summary>
+        public static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (double? Start, double? End)> RoundTimes = new();
+        /// <summary>A report to return in the RunResult, by player; none gives no report (the orchestrator's verdict then follows Ok).</summary>
+        public static readonly System.Collections.Concurrent.ConcurrentDictionary<string, CaptureReport> Reports = new();
+        private readonly string _player;
 
         /// <param name="building">How long the capture takes to build after it is stopped.</param>
         public FakeCapture(CaptureOptions options, string? template, TimeSpan building = default)
         {
+            _player = options.Player?.PlayerId ?? "";
+            RoundTimes[_player] = (options.RoundStartUtcMs, null);
             SessionDir = Path.Combine(options.OutputRoot, options.DirName ?? Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(SessionDir);
             if (template is not null)
@@ -50,7 +59,7 @@ public sealed class OrchestratorTests : IAsyncLifetime
             {
                 await Task.Delay(building);
                 CaptureFolder.Tidy(SessionDir);  // as CaptureRun leaves the folder
-                return new RunResult(SessionDir, template is not null, null, 0, [], null);
+                return new RunResult(SessionDir, template is not null, null, 0, [], null, Report: Reports.GetValueOrDefault(_player));
             }).Unwrap();
         }
 
@@ -58,7 +67,11 @@ public sealed class OrchestratorTests : IAsyncLifetime
         public Task Started => Task.CompletedTask;
         public Task CaptureStopped => _stopped.Task;
         public Task<RunResult> Completion { get; }
-        public void Stop() => _stopped.TrySetResult();
+        public void Stop(double? roundEndUtcMs = null)
+        {
+            RoundTimes[_player] = (RoundTimes.GetValueOrDefault(_player).Start, roundEndUtcMs);
+            _stopped.TrySetResult();
+        }
     }
 
     // The fixture session is 320x180 and 2 s long.
@@ -188,6 +201,49 @@ public sealed class OrchestratorTests : IAsyncLifetime
         _http.PostAsJsonAsync($"/rooms/{_room}/events", e).ContinueWith(t => t.Result.EnsureSuccessStatusCode());
 
     [SkippableFact]
+    public async Task StartAndStopCarryTheRoundsTimesAndEveryPlayersVerdictReachesTheRoundFiles()
+    {
+        Skip.IfNot(SessionFixtures.HasFfmpeg, "needs ffmpeg + ffprobe");
+        string template = SessionFixtures.MakeValidSession(Path.Combine(_root, "template"));
+        File.WriteAllText(Path.Combine(template, SessionBuilder.KeyBindingsFile), "{}");
+        // Bảo's numbers of 2026-11-07: a degraded recording; the other player sends no report.
+        FakeCapture.Reports["slow"] = new CaptureReport(1416, 1416, 30, 1373, 435, 0, true, "process", CaptureReport.Aligned, 3.2, null, null);
+        var finished = new TaskCompletionSource<RoundRecord>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var started = ConnectAgents(template, "slow", "fine");
+        _agents.Last().RoundFinished += r => finished.TrySetResult(r);
+        await WaitForAgents(2);
+        var session = NextSession();
+
+        await Post(new { type = "match_start", match_id = "m2", map = "everon" });
+        await Post(new { type = "round_start", countdown_ms = 1000 });
+        await Task.WhenAll(started.Select(s => s.Task)).WaitAsync(TimeSpan.FromSeconds(10));
+        await Task.Delay(1200);
+        await Post(new { type = "round_end", winner = "t" });
+        await session;
+        var record = await finished.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // The video's frame 0 goes on round_start (countdown event + countdown) and its end on round_end, on every machine.
+        foreach (string p in new[] { "slow", "fine" })
+        {
+            var (start, end) = FakeCapture.RoundTimes[p];
+            Assert.Equal(record.StartUtcMs, start);
+            Assert.Equal(record.EndUtcMs, end);
+        }
+        Assert.Equal(1000, record.CountdownMs);
+        var slow = record.Players.Single(p => p.PlayerId == "slow");
+        Assert.Equal(CaptureReport.Degraded, slow.Verdict);
+        Assert.Equal(["encoder behind: 435 captured frames dropped waiting for it, 97 % of the video duplicated"], slow.Problems);
+        Assert.Equal(1416, slow.Report!.Frames);
+        var fine = record.Players.Single(p => p.PlayerId == "fine");
+        Assert.Equal(CaptureReport.Ok, fine.Verdict);
+        Assert.Empty(fine.Problems!);
+        Assert.Equal("round m2-r01: saved, check · SLOW: degraded, encoder behind: 435 captured frames dropped waiting for it, 97 % of the video duplicated",
+            AgentClient.RoundSummary(record));
+        var status = await RoomStatus();
+        Assert.All(status["members"]!.AsArray(), m => Assert.Null(m!["problem"]));
+    }
+
+    [SkippableFact]
     public async Task RoundBecomesV3SessionWithPerPlayerStopsAndFrameIndexedEvents()
     {
         Skip.IfNot(SessionFixtures.HasFfmpeg, "needs ffmpeg + ffprobe");
@@ -221,7 +277,8 @@ public sealed class OrchestratorTests : IAsyncLifetime
         Assert.InRange((int)p1["pre_roll_frames"]!, 30, 61);
         Assert.InRange((double)p1["pre_roll_ms"]!, 600, 1000);
         Assert.Equal(0, (int)p1["round_start_frame"]!);
-        Assert.InRange((double)p1["round_start_video_time_ms"]!, -20, 0);
+        // Frame 0 is the frame nearest round_start: within half a frame before it, or the first after.
+        Assert.InRange((double)p1["round_start_video_time_ms"]!, -1000.0 / SessionFixtures.Fps, 500.0 / SessionFixtures.Fps);
         Assert.Equal(SessionFixtures.NFrames - (int)p1["pre_roll_frames"]!, (int)p1["recording"]!["frame_count"]!);
         Assert.Contains(p1["qa"]!["checks"]!.AsArray(), c => (string?)c!["id"] == "video.trimmed" && (bool)c["pass"]!);
         Assert.Equal(2, (int)p1["clock_sync"]!["sample_count"]!);

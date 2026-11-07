@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using Odx.Core;
 
 namespace Odx.Recorder;
@@ -17,12 +18,16 @@ internal sealed class FrameWriter
     private readonly FfmpegEncoder _encoder;
     private readonly VideoFrameLogWriter _log;
     private readonly BlockingCollection<byte[]> _free = new();
-    private readonly BlockingCollection<(byte[] Frame, IReadOnlyList<GridTick> Ticks)> _queue = new();
+    private readonly BlockingCollection<(byte[]? Frame, IReadOnlyList<GridTick> Ticks)> _queue = new();
     private readonly Thread _thread;
-    private long _written;
+    private readonly byte[] _black;
+    private long _written, _writeMs, _writeMaxMs;
     private volatile string? _error;
 
     public long Written => Interlocked.Read(ref _written);
+    /// <summary>Time spent blocked on ffmpeg's stdin, in all and for the slowest frame: how far behind the encoder runs.</summary>
+    public long WriteMs => Interlocked.Read(ref _writeMs);
+    public long WriteMaxMs => Interlocked.Read(ref _writeMaxMs);
     /// <summary>Why frames stopped being written (ffmpeg closed its input); later ticks are dropped.</summary>
     public string? Error => _error;
 
@@ -31,6 +36,11 @@ internal sealed class FrameWriter
         _encoder = encoder;
         _log = log;
         for (int i = 0; i < Buffers; i++) _free.Add(new byte[frameBytes]);
+        // NV12 black: Y 16, Cb/Cr 128 (limited range); the Y plane is two thirds of the frame.
+        _black = new byte[frameBytes];
+        int luma = frameBytes * 2 / 3;
+        Array.Fill(_black, (byte)16, 0, luma);
+        Array.Fill(_black, (byte)128, luma, frameBytes - luma);
         _thread = new Thread(Run) { IsBackground = true, Name = "frame writer" };
         _thread.Start();
     }
@@ -41,8 +51,11 @@ internal sealed class FrameWriter
     public bool TryRent(TimeSpan wait, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out byte[]? frame) =>
         _free.TryTake(out frame, wait);
 
-    /// <summary>Queues <paramref name="ticks"/>, all showing <paramref name="frame"/>, which returns to the pool after.</summary>
-    public void Submit(byte[] frame, IReadOnlyList<GridTick> ticks) => _queue.Add((frame, ticks));
+    /// <summary>
+    /// Queues <paramref name="ticks"/>, all showing <paramref name="frame"/>, which returns to the pool after; null shows
+    /// black (ticks before the first captured frame).
+    /// </summary>
+    public void Submit(byte[]? frame, IReadOnlyList<GridTick> ticks) => _queue.Add((frame, ticks));
 
     /// <summary>
     /// Writes what is queued; <see cref="Submit"/> may not be called after. False when ffmpeg did not take it all within
@@ -63,19 +76,23 @@ internal sealed class FrameWriter
             foreach (var t in ticks)
             {
                 if (_error is not null) break;
+                long started = Stopwatch.GetTimestamp();
                 try
                 {
-                    _encoder.Write(frame);
+                    _encoder.Write(frame ?? _black);
                 }
                 catch (IOException e)
                 {
                     _error = $"ffmpeg pipe closed: {e.Message}";
                     break;
                 }
+                long ms = (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+                Interlocked.Add(ref _writeMs, ms);
+                if (ms > Interlocked.Read(ref _writeMaxMs)) Interlocked.Exchange(ref _writeMaxMs, ms);
                 _log.Write(t);
                 Interlocked.Increment(ref _written);
             }
-            _free.Add(frame);
+            if (frame is not null) _free.Add(frame);
         }
     }
 }

@@ -29,6 +29,7 @@ public static class PlayerFile
         json.Remove("vendor_clock_sync");
         json.Remove("vendor_capture_id");
         json.Remove("vendor_audio");
+        json.Remove("vendor_grid_origin_offset_ms");
         json["vendor_name"] = vendorName;
         long durationMs = (long)Math.Round(session["duration_ms"]!.GetValue<double>());
         json["created_at_utc"] = UtcText.IsoSeconds(firstFrameUtcMs);
@@ -56,6 +57,7 @@ public static class PlayerFile
         json["recording"] = new JsonObject
         {
             ["video_first_frame_utc"] = UtcText.IsoUs(firstFrameUtcMs),
+            ["grid_origin_offset_ms"] = session["vendor_grid_origin_offset_ms"]?.DeepClone(),
             ["audio"] = session["vendor_audio"]?.DeepClone(),
         };
         File.WriteAllText(Path.Combine(captureDir, FileName), json.ToJsonString(SessionBuilder.Json));

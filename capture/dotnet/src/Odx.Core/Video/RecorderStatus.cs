@@ -6,17 +6,19 @@ namespace Odx.Core;
 
 /// <summary>
 /// One line of <c>odx record --json-status</c> stdout: <c>started</c> once capture runs, <c>progress</c> every second,
-/// <c>stopped</c> once the capture ended (with <c>Error</c> if it failed), then <c>finalizing</c> (Frames muxed so far)
-/// while video_raw.mp4 and audio.wav become video.mp4 and <c>finalized</c> at the end (with <c>Error</c> if that failed).
-/// Read by the capture host to show live counters and the phase.
+/// <c>stopped</c> once the capture ended (with <c>Error</c> if it failed). Read by the capture host to show live counters
+/// and to tell, from the counters, a recording that is going wrong (<see cref="CaptureReport"/>).
 /// </summary>
+/// <param name="Starved">Captured frames dropped because the encoder had not returned a buffer: the encoder is behind.</param>
+/// <param name="LeadingBlack">Black frames before the first captured one (the recorder started after the grid's origin).</param>
 /// <param name="Audio">The audio track's state when --audio was asked: on <c>started</c> where the sound comes from, on
 /// <c>stopped</c> its counters too. Null without --audio.</param>
 /// <param name="Stop">On <c>stopped</c>: how long each phase of stopping took.</param>
 public sealed record RecorderStatus(string Event, long Frames = 0, long Duplicates = 0, long Dropped = 0, int Width = 0,
-    int Height = 0, double Fps = 0, string? Error = null, AudioStatus? Audio = null, StopTiming? Stop = null)
+    int Height = 0, double Fps = 0, string? Error = null, AudioStatus? Audio = null, StopTiming? Stop = null, long Starved = 0,
+    long LeadingBlack = 0)
 {
-    public const string Started = "started", Progress = "progress", Stopped = "stopped", Finalizing = "finalizing", Finalized = "finalized";
+    public const string Started = "started", Progress = "progress", Stopped = "stopped";
 
     public static readonly JsonSerializerOptions Options = new()
     {

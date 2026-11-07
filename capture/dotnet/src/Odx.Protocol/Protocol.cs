@@ -59,7 +59,7 @@ public static class GameEvents
 public abstract record AgentMessage
 {
     /// <summary>Raised whenever a message changes in a way the other side cannot read; sent in <see cref="Hello"/>.</summary>
-    public const int Version = 3;
+    public const int Version = 4;
 
     public static readonly JsonSerializerOptions Json = new()
     {
@@ -141,25 +141,33 @@ public sealed record Arm(string SessionId, string GameProfileJson, int Fps) : Ag
 
 /// <summary>
 /// Orchestrator → agent: start capturing now; play starts after <paramref name="CountdownMs"/> (the countdown players see
-/// when a host starts the round; 0 when the game server does). Not scheduled for a common instant: capture start-up takes
-/// 0.5–3.5 s, and every frame is put on server time afterwards anyway.
+/// when a host starts the round; 0 when the game server does), at <paramref name="StartUtcMs"/> on the orchestrator's
+/// clock: the agent puts its video's frame 0 there, so every player's frame k is the same instant. Not scheduled for a
+/// common instant: capture start-up takes 0.5–3.5 s; the grid takes care of the alignment.
 /// </summary>
-public sealed record Start(string SessionId, int CountdownMs = 0) : AgentMessage;
+public sealed record Start(string SessionId, int CountdownMs = 0, double? StartUtcMs = null) : AgentMessage;
 
-/// <summary>Orchestrator → agent: stop capturing ("round_end", "permanent_death", "abort", or <see cref="Cancelled"/>: discard).</summary>
-public sealed record Stop(string SessionId, string Reason) : AgentMessage
+/// <summary>
+/// Orchestrator → agent: stop capturing ("round_end", "permanent_death", "abort", or <see cref="Cancelled"/>: discard);
+/// <paramref name="EndUtcMs"/> is when, on the orchestrator's clock: the video is cut there, so every player's has the
+/// same frames.
+/// </summary>
+public sealed record Stop(string SessionId, string Reason, double? EndUtcMs = null) : AgentMessage
 {
     public const string Cancelled = "cancelled";
 }
 
 /// <summary>Agent → orchestrator: idle, armed, starting, recording, saving (stop to Done), error.</summary>
-public sealed record AgentState(string State, string? Detail = null) : AgentMessage;
+/// <param name="Problem">While recording or saving: what is going wrong with the recording, in one line
+/// (<see cref="CaptureReport.LiveProblem"/>), for every member of the room to see; null while all is well.</param>
+public sealed record AgentState(string State, string? Detail = null, string? Problem = null) : AgentMessage;
 
 /// <summary>
 /// Agent → orchestrator: the session's files are kept (or why not). Sent again after every reconnect until the round's
 /// files (<see cref="RoundFiles"/>) arrive, since one sent while the connection was lost goes nowhere.
 /// </summary>
-public sealed record Done(string SessionId, bool Ok, string? Error = null) : AgentMessage;
+/// <param name="Report">The recording's numbers and verdict, kept in round.json for every player.</param>
+public sealed record Done(string SessionId, bool Ok, string? Error = null, CaptureReport? Report = null) : AgentMessage;
 
 /// <summary>Agent → orchestrator: the player is (not) ready; when every player of the room is, a round starts after a countdown.</summary>
 public sealed record Ready(bool IsReady) : AgentMessage;
@@ -187,7 +195,8 @@ public sealed record ToggleRound(int CountdownMs, string? SessionId = null) : Ag
     public static bool IsValidSessionId(string id) => System.Text.RegularExpressions.Regex.IsMatch(id, "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$");
 }
 
-public sealed record RoomMember(string PlayerId, string Name, bool Ready, string State);
+/// <param name="Problem">What is going wrong with this member's recording, while it records or saves (<see cref="AgentState.Problem"/>).</param>
+public sealed record RoomMember(string PlayerId, string Name, bool Ready, string State, string? Problem = null);
 
 /// <summary>Orchestrator → every member whenever the room changes (members, ready, states, round).</summary>
 /// <param name="LanNetworkId">The room's ZeroTier network to join; null when the room has no LAN.</param>

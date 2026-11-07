@@ -589,6 +589,18 @@ public partial class MainWindow : Window
             ToastOverlay.Notify(ok, _roundResult(_t));
             if (_run is null) ShowAgentStatus();
         });
+        // Once every player is done: the whole room's verdict, the same on every machine (who to record again, and why).
+        agent.RoundFinished += record => Dispatcher.BeginInvoke(() =>
+        {
+            if (_room != room) return;
+            static string Line(RoundPlayer p) => $"{p.Name}: {p.Verdict ?? "not done"}" +
+                                                 (p.Problems is { Count: > 0 } problems ? $", {string.Join("; ", problems)}" : "");
+            var failed = record.Players.Where(p => p.Verdict is not (CaptureReport.Ok or CaptureReport.Degraded)).Select(Line).ToList();
+            var degraded = record.Players.Where(p => p.Verdict == CaptureReport.Degraded).Select(Line).ToList();
+            _roundResult = t => t.RoundVerdict(record.SessionId, failed, degraded);
+            ToastOverlay.Notify(failed.Count == 0, _roundResult(_t));
+            if (_run is null) ShowAgentStatus();
+        });
         agent.RoomChanged += update => Dispatcher.BeginInvoke(() =>
         {
             if (_room != room) return;
@@ -694,7 +706,8 @@ public partial class MainWindow : Window
         string log = session.LastLog, hotkey = _settings.Hotkey.ToString();
         bool host = session.Agent.IsHost, ready = session.Agent.IsReady;
         string members = string.Join(" · ", room.Members.Select(m =>
-            m.Name + (m.PlayerId == room.HostPlayerId ? " (host)" : "") + (m.Ready ? " ✓" : "")));
+            m.Name + (m.PlayerId == room.HostPlayerId ? " (host)" : "") + (m.Ready ? " ✓" : "") + _t.MemberState(m.State) +
+            (m.Problem is { } problem ? $" ⚠ {problem}" : "")));
         var lan = session.Lan;
         bool? packets = session.Packets;
         var round = _roundResult;

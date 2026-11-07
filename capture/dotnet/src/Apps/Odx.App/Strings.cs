@@ -102,6 +102,10 @@ public sealed class Strings
     public required string PlayerIdentityRequired { get; init; }
     public required string JoiningRoom { get; init; }
     public required Func<string, bool, string, string> RoomStatus { get; init; }
+    /// <summary>What a member is doing, after their name: starting, recording, saving; empty when idle.</summary>
+    public required Func<string, string> MemberState { get; init; }
+    /// <summary>The round's outcome for the whole room: the players to record again (failed) and those to check (degraded), each with their problems.</summary>
+    public required Func<string, IReadOnlyList<string>, IReadOnlyList<string>, string> RoundVerdict { get; init; }
     public required Func<string, string> StartRound { get; init; }
     public required Func<int, int, string> WaitingReady { get; init; }
     public required Func<int, string> WaitingSaving { get; init; }
@@ -237,6 +241,11 @@ public sealed class Strings
         PlayerIdentityRequired = "Fill in your Player ID (1-32 lowercase letters, digits, - or _) and your Name first.",
         JoiningRoom = "Joining the room…",
         RoomStatus = (code, host, members) => $"Room {code}{(host ? " · you are the host: share this invite code" : "")}\nPlayers: {members}",
+        MemberState = state => state switch { "starting" => " · starting", "recording" => " · recording", "saving" => " · saving…", _ => "" },
+        RoundVerdict = (session, failed, degraded) =>
+            failed.Count == 0 && degraded.Count == 0 ? $"✓ Round {session}: every player kept it" :
+            (failed.Count > 0 ? $"✗ Round {session} · RECORD AGAIN" : $"⚠ Round {session} · saved, check") +
+            string.Concat(failed.Select(f => $"\n  {f}")) + string.Concat(degraded.Select(d => $"\n  {d}")),
         StartRound = hotkey => $"Start round ({hotkey})",
         WaitingReady = (ready, others) => $"Waiting for players to be ready ({ready}/{others})",
         WaitingSaving = saving => $"Waiting for {saving} player(s) to save the last round…",
@@ -385,6 +394,11 @@ public sealed class Strings
         PlayerIdentityRequired = "Hãy điền Mã người chơi (1-32 chữ thường, số, - hoặc _) và Tên trước.",
         JoiningRoom = "Đang vào room…",
         RoomStatus = (code, host, members) => $"Room {code}{(host ? " · bạn là host: gửi mã mời này cho mọi người" : "")}\nNgười chơi: {members}",
+        MemberState = state => state switch { "starting" => " · đang khởi động", "recording" => " · đang ghi", "saving" => " · đang lưu…", _ => "" },
+        RoundVerdict = (session, failed, degraded) =>
+            failed.Count == 0 && degraded.Count == 0 ? $"✓ Round {session}: mọi người đều ghi tốt" :
+            (failed.Count > 0 ? $"✗ Round {session} · QUAY LẠI" : $"⚠ Round {session} · đã lưu, cần xem") +
+            string.Concat(failed.Select(f => $"\n  {f}")) + string.Concat(degraded.Select(d => $"\n  {d}")),
         StartRound = hotkey => $"Bắt đầu round ({hotkey})",
         WaitingReady = (ready, others) => $"Chờ mọi người sẵn sàng ({ready}/{others})",
         WaitingSaving = saving => $"Chờ {saving} người lưu xong round trước…",

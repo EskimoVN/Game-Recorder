@@ -269,7 +269,9 @@ public static class MultiplayerSession
 
         info["first_frame_utc"] = UtcText.Iso(frameUtc[0]);
         info["last_frame_utc"] = UtcText.Iso(frameUtc[^1]);
-        int roundStartFrame = frameUtc.FindIndex(t => t >= round.StartUtcMs);
+        // The frame on screen when play starts: the one nearest round_start (the same rule as the pre-roll cut).
+        double fps = capture["fps"]?.GetValue<double>() ?? 0;
+        int roundStartFrame = frameUtc.FindIndex(t => t >= round.StartUtcMs - (fps > 0 ? 500 / fps : 0));
         info["round_start_frame"] = roundStartFrame < 0 ? null : roundStartFrame;
         info["round_start_video_time_ms"] = Math.Round(round.StartUtcMs - frameUtc[0], 1);
 
@@ -406,17 +408,20 @@ public static class MultiplayerSession
 
     /// <summary>
     /// Players record from the countdown, a few seconds before play, and spec v3 §1 makes the round the task boundary: the
-    /// delivered stream starts at the first frame at or after round_start. The video is re-encoded for a frame-accurate cut
-    /// (odx record's keyframes are 2–4 s apart), frames.csv is rebased (frame 0, timestamp 0), and frames.bin and
-    /// events.jsonl follow from the rebased rows. Returns the frames cut; 0 when nothing precedes round_start, when the
-    /// frame indexes cannot be trusted (video.frame_count already fails) or when the cut failed (video.trimmed fails).
+    /// delivered stream starts at the frame nearest round_start (within half a frame before it, else the first after:
+    /// a grid placed on round_start lands ±20 ms around it, and "at or after" would cut frame 0 on half the machines).
+    /// The video is re-encoded for a frame-accurate cut (odx record's keyframes are 2–4 s apart), frames.csv is rebased
+    /// (frame 0, timestamp 0), and frames.bin and events.jsonl follow from the rebased rows. Returns the frames cut; 0
+    /// when nothing precedes round_start, when the frame indexes cannot be trusted (video.frame_count already fails) or
+    /// when the cut failed (video.trimmed fails).
     /// </summary>
     private static int TrimToRoundStart(RoundRecord round, string dst, JsonObject capture, List<Dictionary<string, string>> rows,
         List<double> frameUtc, JsonObject info, List<QaCheck> checks)
     {
-        int n = frameUtc.FindIndex(t => t >= round.StartUtcMs);
-        string video = Path.Combine(dst, "video.mp4");
         double fps = capture["fps"]?.GetValue<double>() ?? 0;
+        double half = fps > 0 ? 500 / fps : 0;
+        int n = frameUtc.FindIndex(t => t >= round.StartUtcMs - half);
+        string video = Path.Combine(dst, "video.mp4");
         if (n <= 0 || fps <= 0 || !File.Exists(video)) return 0;
         Mp4Info mp4;
         try

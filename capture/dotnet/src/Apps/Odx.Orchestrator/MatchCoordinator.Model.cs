@@ -13,6 +13,8 @@ public sealed partial class MatchCoordinator
         public WebSocket Socket { get; } = socket;
         public SemaphoreSlim SendLock { get; } = new(1, 1);
         public string State { get; set; } = "idle";
+        /// <summary>What is going wrong with its recording (<see cref="AgentState.Problem"/>); null while all is well or idle.</summary>
+        public string? Problem { get; set; }
         public bool Ready { get; set; }
         public Room? Room { get; set; }
         /// <summary>ZeroTier node authorized on the room's LAN.</summary>

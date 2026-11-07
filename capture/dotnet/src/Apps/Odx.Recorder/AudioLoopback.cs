@@ -138,6 +138,12 @@ internal sealed class AudioLoopback : IDisposable
         lock (_gate) _timeline.SetOrigin(qpcMs);
     }
 
+    /// <summary>The stop: nothing captured after <paramref name="stopQpcMs"/> goes to the file, however long the video takes to drain.</summary>
+    public void End(double stopQpcMs)
+    {
+        lock (_gate) _timeline.EndMs = stopQpcMs;
+    }
+
     /// <summary>
     /// Pads to <paramref name="stopQpcMs"/> and closes the file. Bounded: a stop never hangs on audio. The round of
     /// 2026-11-06 (abcbc1) hung here with the capture thread inside WASAPI until odx-app killed the recorder, so a thread
@@ -249,10 +255,10 @@ internal sealed class AudioLoopback : IDisposable
 
     private void Place(byte[] data, double qpcMs)
     {
-        var (pad, skip) = _timeline.Place(qpcMs, data.Length / _bytesPerFrame);
+        var (pad, skip, take) = _timeline.Place(qpcMs, data.Length / _bytesPerFrame);
         Enqueue(Silence(pad));
-        if (skip == 0) Enqueue(data);
-        else if (skip * _bytesPerFrame < data.Length) Enqueue(data[(skip * _bytesPerFrame)..]);
+        if (take == 0) return;
+        Enqueue(skip == 0 && take * _bytesPerFrame == data.Length ? data : data[(skip * _bytesPerFrame)..((skip + take) * _bytesPerFrame)]);
     }
 
     private IEnumerable<byte[]> Silence(long frames)

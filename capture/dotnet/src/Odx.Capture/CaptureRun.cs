@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
 using Odx.Core;
+using Odx.Protocol;
 
 namespace Odx.Capture;
 
@@ -16,8 +17,11 @@ namespace Odx.Capture;
 /// <param name="Player">Named in player.json; null outside a room.</param>
 /// <param name="Obs">Record the video with the player's OBS (odx record --obs) instead of Windows.Graphics.Capture; OBS's
 /// own frame rate and audio settings apply.</param>
+/// <param name="RoundStartUtcMs">The round's start on the orchestrator's clock: the video's frame 0 is put there
+/// (<see cref="GridOrigin"/>, measured against <paramref name="NtpServer"/>). Null outside a room: frame 0 is the first frame.</param>
 public sealed record CaptureOptions(string OutputRoot, string? WindowProcess, int Fps, string? GameProfile, string? NtpServer,
-    int NtpIntervalS = 15, string? DirName = null, bool Audio = false, PlayerIdentity? Player = null, ObsConnection? Obs = null);
+    int NtpIntervalS = 15, string? DirName = null, bool Audio = false, PlayerIdentity? Player = null, ObsConnection? Obs = null,
+    double? RoundStartUtcMs = null);
 
 /// <param name="Address">host:port of OBS's WebSocket server.</param>
 public sealed record ObsConnection(string Address, string? Password);
@@ -27,8 +31,11 @@ public sealed record ObsConnection(string Address, string? Password);
 /// <param name="Build">Null when no game profile was selected.</param>
 /// <param name="Failure">Why the capture failed, in one line: a tool that had to be killed, the recorder's own error, or
 /// its exit code. Null when <paramref name="CaptureOk"/>.</param>
+/// <param name="Finalize">video_raw.mp4 + audio.wav → video.mp4, cut to the round; null when it did not run (OBS, no raw video).</param>
+/// <param name="Report">The recording's numbers and verdict, for the orchestrator and every machine in the room; null from a fake.</param>
 public sealed record RunResult(string SessionDir, bool CaptureOk, RecorderStatus? Recording, int InputEvents,
-    IReadOnlyList<string> ToolErrors, BuildResult? Build, string? Failure = null)
+    IReadOnlyList<string> ToolErrors, BuildResult? Build, string? Failure = null, VideoFinalize.Result? Finalize = null,
+    CaptureReport? Report = null)
 {
     public bool Ok => CaptureOk && (Build is null || (Build.Error is null && Build.Issues.All(i => i.Severity != Issue.ErrorSeverity)));
 }
@@ -52,24 +59,27 @@ public interface ICaptureRun
     int FinalizePercent { get; }
     /// <summary>Raised off the caller's thread when <see cref="Phase"/> or <see cref="FinalizePercent"/> changes.</summary>
     event Action? PhaseChanged;
-    void Stop();
+    /// <summary>What is going wrong with the recording, from the recorder's counters (<see cref="CaptureReport.LiveProblem"/>); null while all is well.</summary>
+    string? Problem { get; }
+    /// <summary>Raised off the caller's thread when <see cref="Problem"/> changes.</summary>
+    event Action<string?>? ProblemChanged;
+    /// <param name="roundEndUtcMs">The round's end on the orchestrator's clock: the video is cut there; null keeps every frame.</param>
+    void Stop(double? roundEndUtcMs = null);
 }
 
 /// <summary>
 /// One recording: `odx input` and `odx record` run as child processes into the same session folder, both stopped through
 /// a shared named event. If either child exits on its own (error, captured window closed), the other is stopped too.
-/// The recorder stops its capture (status stopped) and then finalizes the video (video_raw.mp4 + audio.wav → video.mp4,
-/// status finalizing/finalized); each gets its own time limit, and a recorder killed in either leaves a capture that
-/// <see cref="VideoFinalize.RunIfNeeded"/> turns into a video here. After a clean stop the folder is built into a spec v2
-/// session with the chosen game profile and validated, then tidied (<see cref="CaptureFolder"/>): the delivered files at
-/// the top, the raw logs in raw/.
+/// In a room the recorder's grid starts at the round's start (<see cref="GridOrigin"/>). Once both have exited (the
+/// recorder's stop has its own limits and a watchdog), the video is finalized here (video_raw.mp4 + audio.wav →
+/// video.mp4, cut to the round's end: <see cref="VideoFinalize.RunIfNeeded"/>), the folder is built into a spec v2 session
+/// with the chosen game profile and validated, then tidied (<see cref="CaptureFolder"/>): the delivered files at the top,
+/// the raw logs in raw/.
 /// </summary>
 public sealed class CaptureRun : ICaptureRun
 {
-    /// <summary>Until the recorder reports stopped: its own limits add up to ~31 s (RecordCommand), so this never wins.</summary>
+    /// <summary>Until both tools have exited: the recorder's own limits add up to ~31 s and its watchdog ends it at 40 s (RecordCommand), so this never wins.</summary>
     private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(60);
-    /// <summary>Added to the finalize's own limit (<see cref="VideoFinalize.Limit"/>) before the recorder is killed.</summary>
-    private static readonly TimeSpan FinalizeMargin = TimeSpan.FromSeconds(30);
 
     private readonly EventWaitHandle _stop;
     private readonly List<string> _stderr = [];
@@ -83,7 +93,12 @@ public sealed class CaptureRun : ICaptureRun
     /// <summary>The round's session id when the agent runs this capture (its DirName); null for a capture outside a room.</summary>
     private readonly string? _sessionId;
     private readonly string? _reforgerDir;
+    private readonly double? _roundStartUtcMs, _originRttMs;
+    private readonly string? _gridOrigin;
+    private double _roundEndUtcMs = double.NaN;
+    private readonly double _fps;
     private RecorderStatus? _lastStatus;
+    private string? _problem;
 
     public string SessionDir { get; }
     /// <summary>Completes when odx record reports that capture is running; it can take seconds on a cold start.</summary>
@@ -96,6 +111,8 @@ public sealed class CaptureRun : ICaptureRun
     public CapturePhase Phase => _phase;
     public int FinalizePercent => _finalizePercent;
     public event Action? PhaseChanged;
+    public string? Problem => Volatile.Read(ref _problem);
+    public event Action<string?>? ProblemChanged;
 
     private CaptureRun(CaptureOptions options)
     {
@@ -103,6 +120,7 @@ public sealed class CaptureRun : ICaptureRun
         _gameProfile = options.GameProfile;
         _player = options.Player;
         _sessionId = options.DirName;
+        _fps = options.Fps;
         Directory.CreateDirectory(SessionDir);
         var profile = TryLoadProfile(options.GameProfile);
         if (profile?.CameraSource == ReforgerCamera.Source)
@@ -121,6 +139,15 @@ public sealed class CaptureRun : ICaptureRun
         string stopName = $@"Local\odx-stop-{Guid.NewGuid():N}";
         _stop = new EventWaitHandle(false, EventResetMode.ManualReset, stopName);
 
+        double? originQpcMs = null;
+        if (options.RoundStartUtcMs is double roundStart)
+        {
+            _roundStartUtcMs = roundStart;
+            if (string.IsNullOrWhiteSpace(options.NtpServer)) _gridOrigin = "free: no time service";
+            else (originQpcMs, _originRttMs, _gridOrigin) = GridOrigin.Measure(options.NtpServer.Trim(), roundStart);
+            if (originQpcMs is null) _stderr.Add($"video grid not aligned to the round's start ({_gridOrigin})");
+        }
+
         var inputArgs = new List<string> { "--out", SessionDir, "--stop-event", stopName };
         if (!string.IsNullOrWhiteSpace(options.NtpServer))
             inputArgs.AddRange(["--ntp", options.NtpServer.Trim(), "--ntp-interval-s", options.NtpIntervalS.ToString(CultureInfo.InvariantCulture)]);
@@ -133,6 +160,7 @@ public sealed class CaptureRun : ICaptureRun
         if (options.Audio && options.WindowProcess is null && profile?.WindowProcess is string game)
             recordArgs.AddRange(["--audio-process", game]);
         if (options.Obs is { } obs) recordArgs.AddRange(["--obs", obs.Address]);
+        if (originQpcMs is double origin) recordArgs.AddRange(["--grid-origin-qpc-ms", origin.ToString("R", CultureInfo.InvariantCulture)]);
         Process record;
         try
         {
@@ -151,14 +179,14 @@ public sealed class CaptureRun : ICaptureRun
                         _captureStopped.TrySetResult();
                         SetPhase(CapturePhase.Finalizing, 0);
                         break;
-                    case RecorderStatus.Finalizing:
-                        long total = LastStatus?.Frames ?? 0;
-                        SetPhase(CapturePhase.Finalizing, total > 0 ? (int)Math.Clamp(status.Frames * 100 / total, 0, 100) : 0);
-                        break;
-                    case RecorderStatus.Finalized:
-                        break;  // the exit code and recording.json carry the result
                     default:
                         Volatile.Write(ref _lastStatus, status);
+                        string? problem = CaptureReport.LiveProblem(status.Frames, status.Duplicates, status.Starved, status.LeadingBlack, _fps);
+                        if (problem != Volatile.Read(ref _problem))
+                        {
+                            Volatile.Write(ref _problem, problem);
+                            ProblemChanged?.Invoke(problem);
+                        }
                         break;
                 }
             });
@@ -205,8 +233,9 @@ public sealed class CaptureRun : ICaptureRun
         }
     }
 
-    public void Stop()
+    public void Stop(double? roundEndUtcMs = null)
     {
+        if (roundEndUtcMs is double end) Volatile.Write(ref _roundEndUtcMs, end);
         if (_phase == CapturePhase.Recording) SetPhase(CapturePhase.Stopping, 0);
         _stop.Set();
     }
@@ -254,13 +283,12 @@ public sealed class CaptureRun : ICaptureRun
         _stop.Set();
         if (_phase == CapturePhase.Recording) SetPhase(CapturePhase.Stopping, 0);
         string? failure = null;
-        // 1. The capture stops: odx input exits, odx record reports stopped (or exits, when it failed earlier).
+        // The capture stops: both tools exit (the recorder after its stop path, bounded by its watchdog).
         using (var timeout = new CancellationTokenSource(StopTimeout))
         {
             try
             {
-                await Task.WhenAll(input.WaitForExitAsync(timeout.Token),
-                    Task.WhenAny(recordExited, _recorderStopped.Task).WaitAsync(timeout.Token));
+                await Task.WhenAll(input.WaitForExitAsync(timeout.Token), recordExited.WaitAsync(timeout.Token));
             }
             catch (OperationCanceledException)
             {
@@ -276,37 +304,24 @@ public sealed class CaptureRun : ICaptureRun
         }
         _stop.Dispose();
         _captureStopped.TrySetResult();
-        // 2. The recorder finalizes the video (its own limit, VideoFinalize.Limit); a margin on top, then it is killed.
-        if (!record.HasExited)
-        {
-            var status0 = _recorderStopped.Task.IsCompletedSuccessfully ? _recorderStopped.Task.Result : null;
-            double seconds = status0 is { Fps: > 0 } st ? st.Frames / st.Fps : 0;
-            using var timeout = new CancellationTokenSource(VideoFinalize.Limit(seconds) + FinalizeMargin);
-            try
-            {
-                await recordExited.WaitAsync(timeout.Token);
-            }
-            catch (OperationCanceledException)
-            {
-                record.Kill(entireProcessTree: true);
-                failure ??= $"odx record did not finish the video within {(VideoFinalize.Limit(seconds) + FinalizeMargin).TotalSeconds:0} s; killed";
-                lock (_stderr) _stderr.Add(failure);
-            }
-        }
-        await recordExited;
+        await Task.WhenAll(input.WaitForExitAsync(), recordExited);
 
         bool captureOk = input.ExitCode == 0 && record.ExitCode == 0;
         var status = LastStatus is { Event: RecorderStatus.Stopped } stopped ? stopped : null;
         if (!captureOk)
-            failure ??= status?.Error ?? FinalizeError() ?? (record.ExitCode != 0 ? $"odx record exited with {record.ExitCode}" : $"odx input exited with {input.ExitCode}");
-        // A recorder killed before it could finalize (or that crashed) still leaves a playable video, once the ffmpeg it
-        // left behind has finished writing it.
+            failure ??= status?.Error ?? (record.ExitCode != 0 ? $"odx record exited with {record.ExitCode}" : $"odx input exited with {input.ExitCode}");
+        // A killed recorder leaves its ffmpeg finishing video_raw.mp4; then the round's frames become video.mp4.
         await SettledAsync(Path.Combine(SessionDir, VideoFinalize.RawVideo));
-        if (VideoFinalize.RunIfNeeded(SessionDir, ExternalTools.Ffmpeg(), n => SetPhase(CapturePhase.Finalizing,
-                status is { Frames: > 0 } ? (int)Math.Clamp(n * 100 / status.Frames, 0, 100) : 0)) is { } late)
-            lock (_stderr) _stderr.Add(late.Ok
-                ? $"video finalized by the capture host: {late.Frames} frames{(late.HasAudio ? " with sound" : "")}, {late.ElapsedMs} ms"
-                : $"video not finalized: {late.Error}");
+        long? roundFrames = WriteRoundTimes();
+        long total = roundFrames ?? status?.Frames ?? 0;
+        var finalize = VideoFinalize.RunIfNeeded(SessionDir, ExternalTools.Ffmpeg(),
+            n => SetPhase(CapturePhase.Finalizing, total > 0 ? (int)Math.Clamp(n * 100 / total, 0, 100) : 0));
+        if (finalize is { Ok: false })
+        {
+            captureOk = false;
+            failure ??= $"video not finalized: {finalize.Error}";
+            lock (_stderr) _stderr.Add(failure);
+        }
         string inputCsv = Path.Combine(SessionDir, "input_events.csv");
         int inputEvents = File.Exists(inputCsv) ? Math.Max(0, File.ReadLines(inputCsv).Count() - 1) : 0;
         if (_reforgerDir is not null &&
@@ -324,9 +339,41 @@ public sealed class CaptureRun : ICaptureRun
         {
             errors.Add($"raw logs not moved into {CaptureFolder.RawDir}/: {e.Message}");
         }
-        var result = new RunResult(SessionDir, captureOk, status, inputEvents, errors, build, failure);
+        var report = new CaptureReport(finalize?.Frames ?? status?.Frames ?? 0, roundFrames, _fps, status?.Duplicates ?? 0,
+            status?.Starved ?? 0, status?.LeadingBlack ?? 0, File.Exists(Path.Combine(SessionDir, VideoFinalize.Output)),
+            status?.Audio?.Source, _gridOrigin, build?.Report?.GridOriginOffsetMs, failure, status?.Audio?.Error);
+        var result = new RunResult(SessionDir, captureOk, status, inputEvents, errors, build, failure, finalize, report);
         SetPhase(CapturePhase.Done, 100);
         return result;
+    }
+
+    /// <summary>
+    /// The round's times and how the grid was placed, into recording.json, where <see cref="VideoFinalize.RunIfNeeded"/>
+    /// takes the frames to keep and the build takes the origin to check. Null outside a room or without the recorder's file.
+    /// </summary>
+    private long? WriteRoundTimes()
+    {
+        string path = Path.Combine(SessionDir, "recording.json");
+        if (_roundStartUtcMs is not double start || !File.Exists(path)) return null;
+        double end = Volatile.Read(ref _roundEndUtcMs);
+        try
+        {
+            var recording = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+            recording["round_start_utc_ms"] = start;
+            recording["round_end_utc_ms"] = double.IsNaN(end) ? null : end;
+            recording["grid_origin"] = _gridOrigin;
+            recording["grid_origin_rtt_ms"] = _originRttMs;
+            File.WriteAllText(path, recording.ToJsonString(new JsonSerializerOptions
+            {
+                WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+            }));
+            return VideoFinalize.RoundFrames(recording);
+        }
+        catch (Exception e) when (e is JsonException or IOException or UnauthorizedAccessException)
+        {
+            lock (_stderr) _stderr.Add($"recording.json: {e.Message}");
+            return null;
+        }
     }
 
     /// <summary>Waits until the file has not grown for 2 s (20 s at most); returns at once when it does not exist.</summary>
@@ -340,22 +387,6 @@ public sealed class CaptureRun : ICaptureRun
             if (size == last) return;
             last = size;
             await Task.Delay(2000);
-        }
-    }
-
-    /// <summary>recording.json → finalize → error, when the recorder's exit code comes from a failed finalize.</summary>
-    private string? FinalizeError()
-    {
-        string path = Path.Combine(SessionDir, "recording.json");
-        if (!File.Exists(path)) return null;
-        try
-        {
-            return System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))?["finalize"]?["error"]?.GetValue<string>() is { } e
-                ? $"video not finalized: {e}" : null;
-        }
-        catch (JsonException)
-        {
-            return null;
         }
     }
 

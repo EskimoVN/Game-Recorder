@@ -90,6 +90,12 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
     /// <summary>A round's capture is done (session id, the capture's result: folder, whether it worked, why not).</summary>
     public event Action<string, RunResult>? RoundKept;
 
+    /// <summary>
+    /// The round's files came from the orchestrator: every player's verdict (<see cref="RoundPlayer.Verdict"/>) is in,
+    /// for the notice every machine shows (document/video-alignment-plan.md §3.4).
+    /// </summary>
+    public event Action<RoundRecord>? RoundFinished;
+
     /// <summary>Whether this player is ready for the next round; the orchestrator clears it when play starts.</summary>
     public bool IsReady { get; private set; }
 
@@ -489,9 +495,9 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
             case Stop s when s.SessionId == _runSessionId || s.SessionId == _startingSessionId:
                 Log?.Invoke($"stop {s.SessionId} ({s.Reason})");
                 lock (_gate) _stopReason = s.Reason;
-                StopCapture();
-                // Saving (stop, finalize, build) until Done: the host sees who the next round waits for.
-                await SendAsync(new AgentState("saving", s.SessionId), stop);
+                StopCapture(s.EndUtcMs);
+                // Saving (stop, finalize, build) until Done: everyone sees who the next round waits for.
+                await SendAsync(new AgentState("saving", s.SessionId, _run?.Problem), stop);
                 break;
         }
     }
@@ -521,12 +527,13 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
     }
 
     /// <summary>A Stop can arrive during the countdown or while the capture is starting; both end up here.</summary>
-    private void StopCapture()
+    /// <param name="endUtcMs">The round's end on the orchestrator's clock (the video is cut there); null when this machine decides (connection lost).</param>
+    private void StopCapture(double? endUtcMs = null)
     {
         lock (_gate)
         {
             _stopBeforeStart?.Cancel();
-            _run?.Stop();
+            _run?.Stop(endUtcMs);
         }
     }
 
@@ -540,7 +547,8 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
         try
         {
             run = startCapture(new CaptureOptions(options.OutputRoot, WindowToRecord(), _armed!.Fps, _profilePath, _timeServer,
-                NtpIntervalS: 1, DirName: s.SessionId, Player: new PlayerIdentity(options.PlayerId, options.Name)));
+                NtpIntervalS: 1, DirName: s.SessionId, Player: new PlayerIdentity(options.PlayerId, options.Name),
+                RoundStartUtcMs: s.StartUtcMs));
         }
         catch (Exception e)
         {
@@ -556,6 +564,11 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
             if (stopped.IsCancellationRequested) run.Stop();
         }
         await SendAsync(new AgentState("recording", s.SessionId), stop);
+        run.ProblemChanged += problem =>
+        {
+            Log?.Invoke(problem is null ? $"{s.SessionId}: recording well again" : $"{s.SessionId}: {problem}");
+            _ = SendAsync(new AgentState(run.Phase == CapturePhase.Recording ? "recording" : "saving", s.SessionId, problem), stop);
+        };
         Log?.Invoke($"recording {s.SessionId} into {run.SessionDir}");
         if (Clock is { } clock)
         {
@@ -593,9 +606,10 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
         }
         bool ok = result.CaptureOk;
         string? failure = ok ? null : result.Failure ?? "capture failed";
-        await SendDoneAsync(new Done(s.SessionId, ok, failure), stop);
+        await SendDoneAsync(new Done(s.SessionId, ok, failure, result.Report), stop);
         await SendAsync(new AgentState("idle"), stop);
-        Log?.Invoke($"{s.SessionId} done: {(ok ? $"kept in {result.SessionDir}" : failure)}");
+        Log?.Invoke($"{s.SessionId} done: {(ok ? $"kept in {result.SessionDir}" : failure)}" +
+                    (result.Report is { } report ? $"; {report.Verdict}{(report.Problems() is { Count: > 0 } p ? $": {string.Join("; ", p)}" : "")}" : ""));
         if (result.Recording?.Audio is { } audio && (audio.Source != AudioStatus.FromProcess || audio.SilentRatio > 0.99 || audio.Error is not null))
             Log?.Invoke($"{s.SessionId} audio: {audio.Source}{(audio.FallbackReason is { } f ? $" ({f})" : "")}" +
                         $"{(audio.SilentRatio is double r ? $", {r:P0} silent" : "")}{(audio.Error is { } e ? $", {e}" : "")}");
@@ -664,6 +678,12 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
         string kept = Path.Combine(options.OutputRoot, files.SessionId);
         try
         {
+            var record = JsonSerializer.Deserialize<RoundRecord>(files.Round, AgentMessage.Json);
+            if (record is not null)
+            {
+                Log?.Invoke(RoundSummary(record));
+                RoundFinished?.Invoke(record);
+            }
             if (!Directory.Exists(kept)) return;
             string raw = CaptureFolder.RawFolder(kept);
             files.WriteTo(raw);
@@ -675,6 +695,17 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
         {
             Log?.Invoke($"{files.SessionId}: cannot write the round's files: {e.Message}");
         }
+    }
+
+    /// <summary>The round's outcome in one line: who to record again, and why; "every player ok" when nobody.</summary>
+    public static string RoundSummary(RoundRecord record)
+    {
+        var bad = record.Players.Where(p => p.Verdict is not CaptureReport.Ok).ToList();
+        if (bad.Count == 0) return $"round {record.SessionId}: every player ok";
+        bool again = bad.Any(p => p.Verdict == CaptureReport.Failed);
+        return $"round {record.SessionId}: {(again ? "RECORD AGAIN" : "saved, check")} · " +
+               string.Join(" · ", bad.Select(p => $"{p.Name}: {p.Verdict ?? "not done"}" +
+                                                  (p.Problems is { Count: > 0 } problems ? $", {string.Join("; ", problems)}" : "")));
     }
 
     private async Task SendAsync(AgentMessage message, CancellationToken stop)

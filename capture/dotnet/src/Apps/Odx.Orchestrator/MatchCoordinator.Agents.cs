@@ -48,7 +48,7 @@ public sealed partial class MatchCoordinator
                 if (message is Done d)
                 {
                     if (!Knows(d.SessionId)) await SendFinishedRoundAsync(link, d.SessionId);
-                    else MarkDone(d.SessionId, hello.PlayerId, d.Ok, d.Error);
+                    else MarkDone(d.SessionId, hello.PlayerId, d.Ok, d.Error, d.Report);
                     continue;
                 }
                 if (message is LanMember lan)
@@ -134,7 +134,7 @@ public sealed partial class MatchCoordinator
             }
         }
         await RunAsync(effects);
-        foreach (string sid in RoundsWaitingFor(playerId)) MarkDone(sid, playerId, false, "agent disconnected");
+        foreach (string sid in RoundsWaitingFor(playerId)) MarkDone(sid, playerId, false, "agent disconnected", null);
     }
 
     /// <summary>The game server agent: told to start and stop with every round from now on, it answers with Done.</summary>
@@ -208,17 +208,23 @@ public sealed partial class MatchCoordinator
         await SendAsync(link, new RoundFiles(sessionId, round.Record.ToJson(), RoundRecord.EventsJsonl(round.Events), _profileJson));
     }
 
-    private void MarkDone(string sessionId, string playerId, bool ok, string? error)
+    private void MarkDone(string sessionId, string playerId, bool ok, string? error, CaptureReport? report)
     {
         OpenRound? round;
+        string verdict = report?.Verdict ?? (ok ? CaptureReport.Ok : CaptureReport.Failed);
+        var problems = report?.Problems() ?? (error is null ? [] : [error]);
         lock (_lock)
         {
             if (!_rounds.TryGetValue(sessionId, out round) || round.IndexOf(playerId) is var i && i < 0) return;
-            round.Record.Players[i] = round.Record.Players[i] with { Done = true, Kept = ok, Error = error };
+            round.Record.Players[i] = round.Record.Players[i] with
+            {
+                Done = true, Kept = ok, Error = error, Report = report, Verdict = verdict, Problems = problems,
+            };
             Save(round);
+            if (verdict == CaptureReport.Ok) log.LogInformation("{Player} done with {Session}: ok", playerId, sessionId);
+            else log.LogWarning("{Player} done with {Session}: {Verdict}: {Problems}", playerId, sessionId, verdict, string.Join("; ", problems));
             if (!round.Ended || !AllDone(round)) return;
         }
-        log.LogInformation("{Player} done with {Session}: {Result}", playerId, sessionId, ok ? "kept" : error);
         _ = FinishAsync(round);
     }
 

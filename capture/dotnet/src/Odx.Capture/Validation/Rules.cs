@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json.Nodes;
 using Odx.Core;
 
 namespace Odx.Capture;
@@ -28,6 +29,9 @@ internal sealed record Rule(string Id, string Severity, string Spec, Needs Needs
 /// <summary>Every vendor check of Capture Spec v2 §1.5, in report order. Add a v3 rule by appending it here.</summary>
 internal static class Rules
 {
+    /// <summary>Under a frame at 30 fps (33 ms), over the ±RTT/2 of the samples the origin comes from (±15–25 ms seen).</summary>
+    public const double GridOriginToleranceMs = 25;
+
     public static readonly IReadOnlyList<Rule> All =
     [
         // §1.5.1 session.json
@@ -50,6 +54,14 @@ internal static class Rules
             double expected = d.Fps!.Value * d.DurationSeconds!.Value;
             return If(Math.Abs(d.FrameCount!.Value - expected) > d.Tol.FrameCountFrames,
                 () => $"frame_count={d.FrameCount} vs fps*duration={expected.ToString("F1", CultureInfo.InvariantCulture)}");
+        }),
+
+        // v3 §4: in a room frame 0 is put on round_start before recording (GridOrigin, ±RTT/2); the full clock fit says
+        // where it landed. A warning: the frames are all there, their time against the other players is off by this much.
+        new("sync.grid_origin", Issue.WarningSeverity, "v3 §4", Needs.Session, d =>
+        {
+            double off = d.Session["vendor_grid_origin_offset_ms"] is JsonValue v && v.TryGetValue(out double o) ? o : 0;
+            return If(Math.Abs(off) > GridOriginToleranceMs, () => $"frame 0 is {Fmt(off)} ms from round_start (limit ±{Fmt(GridOriginToleranceMs)} ms)");
         }),
 
         // §1.5.2 frames.csv structure

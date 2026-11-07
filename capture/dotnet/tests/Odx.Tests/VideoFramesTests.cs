@@ -63,6 +63,40 @@ public class GridResamplerTests
     {
         Assert.Empty(new GridResampler(Fps).Finish(5000));
     }
+
+    [Fact]
+    public void With_an_origin_the_ticks_start_there_and_frames_before_it_are_not_dropped()
+    {
+        var r = new GridResampler(Fps, originMs: 1000);
+        var ticks = Run(r, [950, 970, 990, 1010, 1030], stop: 1050);
+        Assert.Equal([1000.0, 1020, 1040], ticks.Select(t => t.TGridMs));
+        Assert.Equal([990.0, 1010, 1030], ticks.Select(t => t.TSourceMs));  // tick 0 shows the last frame before the origin
+        Assert.Equal(0, r.DroppedSourceFrames);  // 950 and 970, replaced before the origin, are warm-up, not drops
+        Assert.Equal(0, r.LeadingBlackFrames);
+        Assert.All(ticks, t => Assert.False(t.Black));
+    }
+
+    [Fact]
+    public void A_first_frame_after_the_origin_leaves_black_ticks_before_it()
+    {
+        var r = new GridResampler(Fps, originMs: 1000);
+        var ticks = Run(r, [1045, 1065], stop: 1080);
+        Assert.Equal([1000.0, 1020, 1040, 1060], ticks.Select(t => t.TGridMs));
+        Assert.Equal([true, true, true, false], ticks.Select(t => t.Black));
+        Assert.Equal([1000.0, 1020, 1040, 1045], ticks.Select(t => t.TSourceMs));  // a black tick's source is the tick itself
+        Assert.Equal([true, true, true, false], ticks.Select(t => t.Duplicate));
+        Assert.Equal(3, r.LeadingBlackFrames);
+        Assert.Equal(0, r.Duplicates);
+        Assert.Equal(0, r.DroppedSourceFrames);
+    }
+
+    [Fact]
+    public void Frames_after_the_origin_are_dropped_as_usual()
+    {
+        var r = new GridResampler(Fps, originMs: 1000);
+        Run(r, [1000, 1005, 1010, 1025], stop: 1040);
+        Assert.Equal(1, r.DroppedSourceFrames);
+    }
 }
 
 public class VideoFrameLogTests

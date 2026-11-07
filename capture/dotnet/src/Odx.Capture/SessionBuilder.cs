@@ -8,8 +8,9 @@ namespace Odx.Capture;
 /// <param name="UnboundKeys">Keys pressed but not in the profile's bindings, with press counts. Spec v2 §1.5 requires
 /// every active key to map to an action, so they are left out of input_keys.</param>
 /// <param name="CameraFrames">Frames with camera columns; 0 for an action-only capture (no camera samples).</param>
+/// <param name="GridOriginOffsetMs">Frame 0 against round_start on the orchestrator's clock (session.json vendor_grid_origin_offset_ms); null outside a room.</param>
 public sealed record BuildReport(string SessionId, int FrameCount, double DurationMs, IReadOnlyDictionary<string, int> UnboundKeys,
-    int CameraFrames, ClockSync Clock);
+    int CameraFrames, ClockSync Clock, double? GridOriginOffsetMs = null);
 
 /// <summary>Where the session's UTC times come from (spec v3 §4: NTP baseline plus measured offset and RTT).</summary>
 /// <param name="Source">"sntp" (ntp_samples.csv: SNTP against <paramref name="Server"/>, a real NTP server alone or the
@@ -67,6 +68,7 @@ public static class SessionBuilder
         double startUnixMs = clockMap.ToUnixMs(times[0]);
         string captureId = Required<string>(recording, "capture_id");
         sessionId ??= captureId;
+        double? gridOriginOffset = GridOriginOffset(recording, clockMap);
         var session = new JsonObject
         {
             ["vendor_name"] = config.VendorName.ToLowerInvariant(),
@@ -93,14 +95,22 @@ public static class SessionBuilder
             ["vendor_capture_id"] = captureId,
             // Not in the spec: the audio track's source and health (odx record --audio; null without it).
             ["vendor_audio"] = recording["audio"]?["status"]?.DeepClone(),
+            // Not in the spec: frame 0 against the round's start on the orchestrator's clock, by the full clock fit (a room
+            // puts the grid there before recording from a few samples: GridOrigin); null outside a room or with a free grid.
+            ["vendor_grid_origin_offset_ms"] = gridOriginOffset,
         };
         File.WriteAllText(Path.Combine(captureDir, "session.json"), session.ToJsonString(Json));
         WriteKeyBindings(captureDir, profile);
         ClientFramesBin.Write(Path.Combine(captureDir, ClientFramesBin.FileName), sessionId, rows,
             times.Select(t => t - times[0]).ToList(), times.Select(clockMap.ToUnixMs).ToList(), config);
         PlayerFile.Write(captureDir, session, startUnixMs, player, config.VendorName);
-        return new BuildReport(sessionId, frames.Count, durationMs, unbound, cameras?.Count(c => c is not null) ?? 0, clock);
+        return new BuildReport(sessionId, frames.Count, durationMs, unbound, cameras?.Count(c => c is not null) ?? 0, clock, gridOriginOffset);
     }
+
+    private static double? GridOriginOffset(JsonObject recording, ClockMap clockMap) =>
+        recording["grid_origin_qpc_ms"] is JsonValue o && o.TryGetValue(out double origin) &&
+        recording["round_start_utc_ms"] is JsonValue s && s.TryGetValue(out double start)
+            ? Math.Round(clockMap.ToUnixMs(origin) - start, 1) : null;
 
     /// <summary>The SOW §2 key bindings: the whole game profile, so the bindings come with the game's other settings.</summary>
     private static void WriteKeyBindings(string captureDir, GameProfile profile) =>

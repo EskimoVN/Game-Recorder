@@ -52,6 +52,10 @@ public sealed class RoomSession : IDisposable
         yield return $"{session}: {(result.CaptureOk ? "capture ok" : $"capture failed: {result.Failure}")}, " +
                      $"{result.InputEvents} input events, build {(result.Build is null ? "skipped" : result.Build.Error ?? $"{result.Build.Issues.Count} issue(s)")}, in {result.SessionDir}";
         if (result.Recording is { } recording) yield return $"{session}: odx record {recording.ToJson()}";
+        if (result.Report is { } report)
+            yield return $"{session}: {report.Verdict}{(report.Problems() is { Count: > 0 } p ? $": {string.Join("; ", p)}" : "")} " +
+                         $"({report.Frames}/{report.RoundFrames?.ToString() ?? "?"} frames, {report.Duplicates} duplicated, {report.Starved} starved, " +
+                         $"{report.LeadingBlack} black, grid {report.GridOrigin ?? "free"}{(report.GridOriginOffsetMs is double o ? $" {o:+0.0;-0.0} ms" : "")})";
         foreach (string error in result.ToolErrors) yield return $"{session}: {error}";
     }
 

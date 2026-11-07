@@ -184,13 +184,15 @@ public sealed class ReconnectTests : IAsyncLifetime
         public CapturePhase Phase => CapturePhase.Recording;
         public int FinalizePercent => 0;
         public event Action? PhaseChanged { add { } remove { } }
+        public string? Problem => null;
+        public event Action<string?>? ProblemChanged { add { } remove { } }
         public DateTime? StoppedAt { get; private set; }
         public string SessionDir => inner.SessionDir;
         public Task Started => inner.Started;
         public Task CaptureStopped => inner.CaptureStopped;
         public Task<RunResult> Completion => inner.Completion;
 
-        public void Stop()
+        public void Stop(double? roundEndUtcMs = null)
         {
             StoppedAt ??= DateTime.UtcNow;
             inner.Stop();

@@ -104,9 +104,9 @@ public sealed partial class MatchCoordinator
         {
             a.State = "starting";
             effects.Sends.Add((a, new Arm(sid, _profileJson, options.Fps)));
-            effects.Sends.Add((a, new Start(sid, countdownMs)));
+            effects.Sends.Add((a, new Start(sid, countdownMs, utc + countdownMs)));
         }
-        if (server is not null) effects.Sends.Add((server, new Start(sid, countdownMs)));
+        if (server is not null) effects.Sends.Add((server, new Start(sid, countdownMs, utc + countdownMs)));
         if (countdownMs > 0)
         {
             e["type"] = "round_countdown";
@@ -171,7 +171,7 @@ public sealed partial class MatchCoordinator
         int i = round.IndexOf(playerId);
         if (i < 0 || round.Record.Players[i].StopReason is not null) return;
         round.Record.Players[i] = round.Record.Players[i] with { StopReason = reason, StopUtcMs = utc };
-        if (_agents.TryGetValue(playerId, out var link)) effects.Sends.Add((link, new Stop(round.Record.SessionId, reason)));
+        if (_agents.TryGetValue(playerId, out var link)) effects.Sends.Add((link, new Stop(round.Record.SessionId, reason, utc)));
         log.LogInformation("stop {Player} in {Session}: {Reason}", playerId, round.Record.SessionId, reason);
     }
 

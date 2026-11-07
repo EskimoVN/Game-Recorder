@@ -77,9 +77,51 @@ Make the delivered video from them, then build the session:
 odx build <round folder> --profile games\<game>.json
 ```
 
-`odx build` finalizes first (`finalized video.mp4: N frames with sound`) and deletes the parts once `video.mp4` stands. A
-`video.mp4 has N frames, video_frames.csv M` message means ffmpeg was killed while recording: the video is playable but
-short of the last fragment (≤ 4 s), and the round fails validation.
+`odx build` finalizes first (`finalized video.mp4: N frames with sound`), cut to the round's frames when `recording.json`
+carries the round's times, and deletes the parts once `video.mp4` stands. A `video.mp4 has N frames, expected M` message
+means ffmpeg was killed while recording: the video is playable but short of the last fragment (≤ 4 s), and the round
+fails validation.
+
+## The video is frozen or jumps: the encoder cannot keep up
+
+The `stopped` line in `data\logs\odx-app-<date>.log` (or `recording.json`) has `starved` in the hundreds (captured frames
+dropped because the encoder had not returned a buffer), `encode_write_ms` near the recording's length, `duplicates`
+close to `frames`, and odx-app showed `⚠ encoder behind` on that player during the round (the round notice says
+`degraded`). `duplicates` alone proves nothing: a player standing still, a loading screen or a game rendering under 30 fps
+duplicate frames with a healthy encoder; `starved` is the sign. The game renders fine; the video encoder (NVENC through
+ffmpeg) on that PC takes far longer than a frame per frame, so the recorder keeps showing the last frame it got through.
+Seen on 2026-11-07 on a PC recording Arma Reforger at 1768x992: 435 starved, 1430 of 1475 frames duplicated, the picture
+changing once a second.
+
+Check it on that PC, while a test round records: Task Manager → Performance → GPU, set one graph to *Video Encode* and
+look at *3D*. *3D* pinned at 100 % with *Video Encode* low and ragged means the game takes the whole GPU and the encoder
+gets its leftovers. Fixes, in order:
+
+1. Run the game in a smaller window: 1280x720 is 2.6× fewer pixels than 1768x992 and 2.25× fewer than 1080p.
+   (until `starved` in the next round's `stopped` line is a small share of `frames`)
+2. Cap the game's frame rate (60 fps in its video settings) so the GPU has slack between frames.
+3. A laptop: on mains, and in the NVIDIA Control Panel set both the game and `odx.exe` to the high-performance GPU.
+4. Update the NVIDIA driver; close other software that uses NVENC (OBS, Discord streaming, GeForce Experience instant
+   replay / ShadowPlay): each takes an encoder session.
+5. Last resort, when the CPU has cores to spare: `odx record --encoder x264` records on the CPU (odx-app does not expose
+   this; run a solo test with `odx record` to see whether it keeps up).
+
+The pre-round check that catches this before a real round: the host runs a 1-minute test round and reads the notice;
+every player with `degraded` or `failed` is named on every machine.
+
+## Reporting a failed or degraded round
+
+The round notice (top right, and the status line) names every player to record again (`failed`) or to check
+(`degraded`), with the problem behind it; the same line is in every machine's daily log (`round <session>: …`). What
+to send with a report, from the named player's PC:
+
+- `data\logs\odx-app-<date>.log` (the whole day).
+- The round folder's `raw\recording.json` and `raw\round.json`, and `player.json`.
+- For a frozen video: the Task Manager observation above and the PC's GPU and CPU (dxdiag), desktop or laptop.
+- For a stop that stuck (`stop stuck in '<step>'` in the log): Windows build (`winver`), GPU driver version, audio device.
+
+A quick self-check before a session, on any PC: open the game, join a room, go Ready and let the host run a 1-minute
+test round. The notice says `every player kept it` or names the problem.
 
 ## No notice after a round
 

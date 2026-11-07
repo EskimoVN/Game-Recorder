@@ -1,6 +1,6 @@
 ﻿// odx record --out <dir> (--window <process name> | --monitor) [--fps 60] [--encoder auto|x264|nvenc|mf] [--ffmpeg <path>]
 //            [--cursor] [--audio [--audio-process <process name>]] [--obs <host:port>] [--seconds N] [--stop-event <name>]
-//            [--json-status] [--probe]
+//            [--grid-origin-qpc-ms <ms>] [--json-status] [--probe]
 //
 // Records a game window, or a monitor (the one the --audio-process game's window is on, else the primary), with
 // Windows.Graphics.Capture. A window must be windowed or borderless: an exclusive-fullscreen window gives black frames,
@@ -8,22 +8,26 @@
 // changes while recording (alt-tab out of fullscreen) keeps the recording going on its last frame until the size is
 // back (size_changed_frames in recording.json). Every captured frame carries its QPC
 // capture time (SystemRelativeTime), the same clock as odx input. Frames are resampled onto a constant-rate grid
-// (GridResampler) and piped to ffmpeg, so the MP4 is CFR and its frame N is row N of video_frames.csv. Writes:
-//   <dir>/video.mp4         CFR H.264, no B-frames; --audio: plus an AAC track, sample 0 at video frame 0, of the game
-//                           process's own sound (--audio-process, else the --window process; not voice chat, browsers or
-//                           other apps), or of everything the default playback device plays when no game process is known.
-//                           Made at the end from video_raw.mp4 (fragmented, video only) and audio.wav (VideoFinalize),
-//                           which stay only when that failed
+// (GridResampler) and piped to ffmpeg, so the video is CFR and its frame N is row N of video_frames.csv. The grid's
+// tick 0 is the first captured frame, or --grid-origin-qpc-ms (a round's start on this machine's QPC clock: every
+// player's frame N is then the same instant; frames before it are discarded, ticks before the first frame are black).
+// Writes:
+//   <dir>/video_raw.mp4     fragmented, video only, CFR H.264, no B-frames: survives a kill
+//   <dir>/audio.wav         --audio: the game process's own sound (--audio-process, else the --window process; not voice
+//                           chat, browsers or other apps), or everything the default playback device plays when no game
+//                           process is known; sample 0 at video frame 0, nothing after the stop
 //   <dir>/video_frames.csv  frame_index,t_grid_qpc_ms,t_source_qpc_ms,duplicate
-//   <dir>/recording.json    capture id, capture and screen size, fps, encoder, start time (UTC + QPC),
-//                           counts of duplicated/dropped frames, audio (null without --audio: sample rate, channels,
-//                           start, and a status: source process|device|none, fallback reason, timing, counters), finalize
+//   <dir>/recording.json    capture id, capture and screen size, fps, encoder, start time (UTC + QPC), the grid origin,
+//                           counts of duplicated/dropped/black/starved frames, where the time went (encoder, readback),
+//                           audio (null without --audio: sample rate, channels, start, and a status: source
+//                           process|device|none, fallback reason, timing, counters)
+// The two media files become video.mp4 afterwards (VideoFinalize: the capture host, or odx build), not here: a round's
+// video is cut to the round's end there, which this process knows nothing about.
 // --obs: OBS records instead, with its own scene, output and audio settings (ObsRecorder); the WebSocket password, if
 // any, comes from the ODX_OBS_PASSWORD environment variable. The same three files are written.
-// Stop with Ctrl+C, --seconds, --stop-event (a named event set by Odx.App), or by closing the captured window. While
-// recording, ffmpeg writes a fragmented, video-only video_raw.mp4 and the sound goes to audio.wav; once the capture has
-// stopped the two become video.mp4 (VideoFinalize), so no pipe can hold the stop and a kill never loses the round.
-// --json-status: stdout carries only RecorderStatus JSON lines (started, progress every second, stopped, finalizing, finalized).
+// Stop with Ctrl+C, --seconds, --stop-event (a named event set by Odx.App), or by closing the captured window. No pipe
+// can hold the stop (ffmpeg gets video only, the sound goes to a file) and a kill never loses the round.
+// --json-status: stdout carries only RecorderStatus JSON lines (started, progress every second, stopped).
 using System.Diagnostics;
 using System.Text.Json;
 using Odx.Core;
@@ -39,7 +43,9 @@ public static class RecordCommand
     // Every wait on the stop path has a limit, so a stuck ffmpeg ends in a recording.json that says which phase stuck
     // (StopTiming) rather than in the capture host killing this process and knowing nothing: the limits in a row (drain,
     // AudioLoopback.Finish, ffmpeg's exit) must add up to well under CaptureRun.StopTimeout (60 s).
-    private static readonly TimeSpan RentWait = TimeSpan.FromMilliseconds(100);
+    // A capture callback blocked here holds up WGC's 2-frame pool: short, so a slow encoder costs frames, not the capture
+    // of what follows (Bảo's round of 2026-11-07 spent most of its 49 s in this wait).
+    private static readonly TimeSpan RentWait = TimeSpan.FromMilliseconds(20);
     private static readonly TimeSpan DrainTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan FfmpegExitTimeout = TimeSpan.FromSeconds(20);
     /// <summary>After the stop signal: past the limits above, a step that never returns ends the process (see the watchdog).</summary>
@@ -51,7 +57,7 @@ public static class RecordCommand
         if (opts is null)
         {
             Console.Error.WriteLine("usage: odx record --out <dir> (--window <process name> | --monitor) [--fps 60] " +
-                                    "[--encoder auto|x264|nvenc|mf] [--ffmpeg <path>] [--cursor] [--audio [--audio-process <process name>]] [--obs <host:port>] [--seconds N] [--stop-event <name>] [--json-status] [--probe]");
+                                    "[--encoder auto|x264|nvenc|mf] [--ffmpeg <path>] [--cursor] [--audio [--audio-process <process name>]] [--obs <host:port>] [--seconds N] [--stop-event <name>] [--grid-origin-qpc-ms <ms>] [--json-status] [--probe]");
             return 2;
         }
         if (opts.Obs is string obs) return RunObs(opts, obs);
@@ -111,7 +117,7 @@ public static class RecordCommand
         FfmpegEncoder? encoder = null;
         // Flushed per row (30 small writes a second): a recorder killed mid-way leaves every frame's row, not a 4 KB buffer short.
         using var frameLog = new VideoFrameLogWriter(new StreamWriter(Path.Combine(opts.OutDir, "video_frames.csv")) { AutoFlush = true });
-        var resampler = new GridResampler(opts.Fps);
+        var resampler = new GridResampler(opts.Fps, opts.GridOriginQpcMs);
 
         var gate = new object();
         var stop = new ManualResetEventSlim();
@@ -189,11 +195,16 @@ public static class RecordCommand
         void Emit(IReadOnlyList<GridTick> ticks, byte[]? next)
         {
             if (ticks is [{ Index: 0 } first, ..]) audio?.SetOrigin(first.TGridMs);
-            writer!.Submit(shown!, ticks);
+            if (ticks is [{ Black: true }, ..])
+            {
+                writer!.Submit(null, ticks);   // before the first frame: black, and the (empty) frame buffer goes back
+                writer.Submit(shown!, []);
+            }
+            else writer!.Submit(shown!, ticks);
             shown = next;
         }
 
-        long starvedFrames = 0;
+        long sourceFrames = 0, starvedFrames = 0, readbackMs = 0, readbackMaxMs = 0;
         void ShowPending()
         {
             if (pending is not { } p) return;
@@ -205,7 +216,11 @@ public static class RecordCommand
                 starvedFrames++;
                 return;
             }
+            long started = Stopwatch.GetTimestamp();
             converter!.Read(p.Staging, incoming);
+            long ms = (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+            readbackMs += ms;
+            readbackMaxMs = Math.Max(readbackMaxMs, ms);
             Emit(resampler.Advance(p.T), incoming);
         }
 
@@ -263,6 +278,7 @@ public static class RecordCommand
                 }
                 double t = frame.SystemRelativeTime.TotalMilliseconds;  // QPC-based, same clock as QpcClock.NowMs()
                 firstFrameLatencyMs ??= QpcClock.NowMs() - t;
+                sourceFrames++;
 
                 using var texture = CaptureInterop.Texture(frame.Surface);
                 var staging = converter!.Convert(texture);
@@ -299,7 +315,8 @@ public static class RecordCommand
         using (var progress = opts.JsonStatus ? new Timer(_ =>
                {
                    RecorderStatus s;
-                   lock (gate) s = new(RecorderStatus.Progress, writer?.Written ?? 0, resampler.Duplicates, resampler.DroppedSourceFrames);
+                   lock (gate) s = new(RecorderStatus.Progress, writer?.Written ?? 0, resampler.Duplicates, resampler.DroppedSourceFrames,
+                       Starved: starvedFrames, LeadingBlack: resampler.LeadingBlackFrames);
                    Console.WriteLine(s.ToJson());
                }, null, 1000, 1000) : null)
         {
@@ -307,6 +324,7 @@ public static class RecordCommand
         }
 
         double stopQpcMs = QpcClock.NowMs();
+        audio?.End(stopQpcMs);  // the sound ends here, whatever the video's drain takes
         var stopClock = Stopwatch.StartNew();
         var phase = Stopwatch.StartNew();
         string[] stopStep = ["last frames"];
@@ -328,11 +346,18 @@ public static class RecordCommand
             ["started_utc"] = startUtc.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
             ["started_qpc_ms"] = startQpcMs,
             ["stopped_qpc_ms"] = stopQpcMs,
+            ["grid_origin_qpc_ms"] = opts.GridOriginQpcMs,
             ["frames"] = frames,
             ["duplicate_frames"] = resampler.Duplicates,
             ["dropped_source_frames"] = resampler.DroppedSourceFrames,
             ["size_changed_frames"] = sizeChangedFrames,
+            ["leading_black_frames"] = resampler.LeadingBlackFrames,
+            ["source_frames"] = sourceFrames,
             ["starved_frames"] = starvedFrames,
+            ["encode_write_ms"] = writer?.WriteMs,
+            ["encode_write_max_ms"] = writer?.WriteMaxMs,
+            ["readback_ms"] = readbackMs,
+            ["readback_max_ms"] = readbackMaxMs,
             ["first_frame_capture_latency_ms"] = firstFrameLatencyMs,
             ["ffmpeg_exit_code"] = ffmpegExit,
             ["stop"] = stopTiming?.ToNode(),
@@ -375,7 +400,7 @@ public static class RecordCommand
             }
             if (opts.JsonStatus)
                 Console.WriteLine(new RecorderStatus(RecorderStatus.Stopped, frames, resampler.Duplicates, resampler.DroppedSourceFrames,
-                    width, height, opts.Fps, complete ? null : problem).ToJson());
+                    width, height, opts.Fps, complete ? null : problem, Starved: starvedFrames, LeadingBlack: resampler.LeadingBlackFrames).ToJson());
             Console.Out.Flush();
             Console.Error.Flush();
             Environment.Exit(complete ? 0 : 1);
@@ -433,28 +458,17 @@ public static class RecordCommand
         if (opts.JsonStatus)
         {
             Console.WriteLine(new RecorderStatus(RecorderStatus.Stopped, framesWritten, resampler.Duplicates,
-                resampler.DroppedSourceFrames, width, height, opts.Fps, error, audioStatus, stopTiming).ToJson());
+                resampler.DroppedSourceFrames, width, height, opts.Fps, error, audioStatus, stopTiming, starvedFrames,
+                resampler.LeadingBlackFrames).ToJson());
         }
         else
         {
             Console.WriteLine($"stopped: {meta["frames"]} frames, {resampler.Duplicates} duplicated, " +
-                              $"{resampler.DroppedSourceFrames} dropped, ffmpeg exit {ffmpegExit}");
+                              $"{resampler.DroppedSourceFrames} dropped, ffmpeg exit {ffmpegExit}; " +
+                              $"video_raw.mp4 and audio.wav become video.mp4 with odx build");
         }
         if (error is not null) Console.Error.WriteLine(error);
-
-        // The capture is on disk whatever happens next: video_raw.mp4 (fragmented) and audio.wav become video.mp4 here,
-        // or in odx build / the capture host if this process is killed first (document/record-finalize-plan.md).
-        var finalize = VideoFinalize.Run(opts.Ffmpeg, Path.Combine(opts.OutDir, VideoFinalize.RawVideo), audio?.Input.File,
-            Path.Combine(opts.OutDir, VideoFinalize.Output), framesWritten, opts.Fps,
-            opts.JsonStatus ? n => Console.WriteLine(new RecorderStatus(RecorderStatus.Finalizing, n).ToJson()) : null);
-        meta["finalize"] = finalize.ToNode();
-        WriteRecordingJson(meta);
-        if (opts.JsonStatus)
-            Console.WriteLine(new RecorderStatus(RecorderStatus.Finalized, finalize.Frames, Error: finalize.Error).ToJson());
-        else if (finalize.Ok)
-            Console.WriteLine($"finalized: video.mp4, {finalize.Frames} frames{(finalize.HasAudio ? " with sound" : "")}, {finalize.ElapsedMs} ms");
-        if (!finalize.Ok) Console.Error.WriteLine($"finalize: {finalize.Error}");
-        return error is null && ffmpegExit == 0 && finalize.Ok ? 0 : 1;
+        return error is null && ffmpegExit == 0 ? 0 : 1;
     }
 
     private static int RunObs(Options opts, string address)
@@ -491,15 +505,17 @@ public static class RecordCommand
     public const string ObsPasswordVariable = "ODX_OBS_PASSWORD";
 }
 
+/// <param name="GridOriginQpcMs">The grid's tick 0 on the QPC clock; null puts it at the first captured frame.</param>
 internal sealed record Options(string OutDir, string? Window, double Fps, string Encoder, string Ffmpeg, bool Cursor,
-    bool Audio, string? AudioProcess, string? Obs, double? Seconds, string? StopEvent, bool JsonStatus, bool Probe)
+    bool Audio, string? AudioProcess, string? Obs, double? Seconds, string? StopEvent, bool JsonStatus, bool Probe,
+    double? GridOriginQpcMs = null)
 {
     public static Options? Parse(string[] args)
     {
         string? outDir = null, window = null, encoder = "auto", ffmpeg = ExternalTools.Ffmpeg(), stopEvent = null, audioProcess = null, obs = null;
         bool monitor = false, cursor = false, audio = false, jsonStatus = false, probe = false;
         double fps = 60;
-        double? seconds = null;
+        double? seconds = null, gridOrigin = null;
         var inv = System.Globalization.CultureInfo.InvariantCulture;
         for (int i = 0; i < args.Length; i++)
         {
@@ -518,12 +534,13 @@ internal sealed record Options(string OutDir, string? Window, double Fps, string
                 case "--obs": obs = Next(); break;
                 case "--seconds" when double.TryParse(Next(), System.Globalization.NumberStyles.Float, inv, out var s): seconds = s; break;
                 case "--stop-event": stopEvent = Next(); break;
+                case "--grid-origin-qpc-ms" when double.TryParse(Next(), System.Globalization.NumberStyles.Float, inv, out var g): gridOrigin = g; break;
                 case "--json-status": jsonStatus = true; break;
                 case "--probe": probe = true; break;
                 default: return null;
             }
         }
         if (outDir is null || encoder is null || ffmpeg is null || (window is null) == !monitor || fps <= 0) return null;
-        return new Options(outDir, window, fps, encoder, ffmpeg, cursor, audio, audioProcess, obs, seconds, stopEvent, jsonStatus, probe);
+        return new Options(outDir, window, fps, encoder, ffmpeg, cursor, audio, audioProcess, obs, seconds, stopEvent, jsonStatus, probe, gridOrigin);
     }
 }
