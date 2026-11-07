@@ -117,6 +117,7 @@ public sealed class Strings
     public required string TaskBatchInvalid { get; init; }
     public required Func<string, string> TaskBatchFull { get; init; }
     public required string TaskNotStarted { get; init; }
+    public required Func<string, string, string> TaskRetake { get; init; }
     public required Func<string, string> EndRound { get; init; }
     public required Func<string, string> ReadyButton { get; init; }
     public required Func<string, string> UnreadyButton { get; init; }
@@ -261,6 +262,7 @@ public sealed class Strings
         TaskBatchInvalid = "Batch code: letters, digits, _ . - only, starting with a letter or digit, not ending with a dot",
         TaskBatchFull = batch => $"Batch {batch} has its 15 videos: type the next batch code",
         TaskNotStarted = "Round not started",
+        TaskRetake = (task, retake) => $"{task} was already used on the server: recording as {retake}. Its folder takes the name {task} on each PC where no folder has it.",
         TaskIdRequired = "Enter the task ID (the round's folder name: letters, digits, _ . -) before starting the round",
         EndRound = hotkey => $"End round ({hotkey})",
         ReadyButton = hotkey => $"I'm ready ({hotkey})",
@@ -419,6 +421,7 @@ public sealed class Strings
         TaskBatchInvalid = "Mã lô chỉ gồm chữ, số, _ . -, bắt đầu bằng chữ hoặc số, không kết thúc bằng dấu chấm",
         TaskBatchFull = batch => $"Lô {batch} đã đủ 15 video: nhập mã lô tiếp theo",
         TaskNotStarted = "Round chưa bắt đầu",
+        TaskRetake = (task, retake) => $"{task} đã dùng trên server: quay với tên {retake}. Máy nào chưa có thư mục {task} thì thư mục sẽ tự đổi về {task}.",
         TaskIdRequired = "Nhập Task ID (tên thư mục của round: chữ, số, _ . -) rồi mới bắt đầu round",
         EndRound = hotkey => $"Kết thúc round ({hotkey})",
         ReadyButton = hotkey => $"Tôi sẵn sàng ({hotkey})",

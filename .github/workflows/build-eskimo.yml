@@ -52,7 +52,46 @@ jobs:
         shell: pwsh
         run: |
           $base = (Get-ChildItem base -Filter '*.zip' | Select-Object -First 1).FullName
-          ./capture/dotnet/build-package.ps1 -Base $base -Version $env:VERSION -Launcher
+          ./capture/dotnet/build-package.ps1 -Base $base -Version $env:VERSION
+
+      # The package's app must open its window (0.2.10 ended silently after the splash): started from the package, it
+      # has to show "Odx Capture" within 90 s; a screenshot of the screen and the app's log are kept as an artifact.
+      - name: Smoke test
+        shell: pwsh
+        run: |
+          $pkg = "capture/dotnet/dist/odx-capture-$env:VERSION-win-x64"
+          New-Item -ItemType Directory -Force smoke | Out-Null
+          $app = Start-Process (Resolve-Path "$pkg/bin/odx-app.exe") -PassThru
+          $title = ''
+          $deadline = (Get-Date).AddSeconds(90)
+          while ((Get-Date) -lt $deadline) {
+            Start-Sleep -Seconds 3
+            $p = Get-Process -Id $app.Id -ErrorAction SilentlyContinue
+            if (-not $p) { break }
+            $p.Refresh()
+            $title = $p.MainWindowTitle
+            if ($title -eq 'Odx Capture') { break }
+          }
+          Start-Sleep -Seconds 5
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $shot = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+          [System.Drawing.Graphics]::FromImage($shot).CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+          $shot.Save((Join-Path $PWD 'smoke/screen.png'))
+          $log = Get-ChildItem "$pkg/data/logs" -Filter '*.log' -ErrorAction SilentlyContinue | Get-Content -Raw
+          if ($log) { $log | Tee-Object -FilePath smoke/odx-app.log }
+          $alive = [bool](Get-Process -Id $app.Id -ErrorAction SilentlyContinue)
+          if ($alive) { Stop-Process -Id $app.Id -Force }
+          if (-not $alive -or $title -ne 'Odx Capture' -or $log -match 'startup failed|unhandled error') {
+            throw "odx-app did not open its window (title '$title', running: $alive)"
+          }
+
+      - name: Keep the smoke test screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-test
+          path: smoke/
 
       - name: Publish the release
         shell: pwsh

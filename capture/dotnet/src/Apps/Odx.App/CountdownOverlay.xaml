@@ -3,9 +3,16 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Odx Capture countdown" WindowStyle="None" AllowsTransparency="True" Background="Transparent"
         Topmost="True" ShowInTaskbar="False" ShowActivated="False" ResizeMode="NoResize"
-        SizeToContent="WidthAndHeight" WindowStartupLocation="CenterScreen" IsHitTestVisible="False">
-    <Border Background="#B0000000" CornerRadius="24" MinWidth="180" Height="180" Padding="32,0">
-        <TextBlock x:Name="Number" Foreground="White" FontSize="110" FontWeight="SemiBold"
-                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+        SizeToContent="WidthAndHeight" WindowStartupLocation="CenterScreen" IsHitTestVisible="False"
+        UseLayoutRounding="True">
+    <Border Background="{StaticResource OverlayGlassBrush}" BorderBrush="{StaticResource HairlineBrush}" BorderThickness="1"
+            CornerRadius="24" MinWidth="180" Height="180" Padding="32,0">
+        <Grid>
+            <TextBlock x:Name="Number" Foreground="{StaticResource TextBrush}" FontFamily="Segoe UI" FontSize="110"
+                       FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center"
+                       TextOptions.TextFormattingMode="Ideal" />
+            <Border Width="36" Height="3" CornerRadius="1.5" Background="{StaticResource AccentBrush}"
+                    HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,20" />
+        </Grid>
     </Border>
 </Window>

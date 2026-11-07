@@ -27,13 +27,33 @@ public partial class App : Application
             Shutdown();
             return;
         }
-        var window = new MainWindow();
-        MainWindow = window;
-        window.Show();
+        // An error here used to end the app silently after the splash (WinExe, no console): it is logged and shown.
+        DispatcherUnhandledException += (_, args) => Report("unhandled error", args.Exception);
+        MainWindow window;
+        try
+        {
+            window = new MainWindow();
+            MainWindow = window;
+            window.Show();
+        }
+        catch (Exception ex)
+        {
+            Report("startup failed", ex);
+            Shutdown(1);
+            return;
+        }
         var showRequests = new EventWaitHandle(false, EventResetMode.AutoReset, ShowEventName);
         new Thread(() =>
         {
             while (showRequests.WaitOne()) Dispatcher.Invoke(window.RestoreFromTray);
         }) { IsBackground = true }.Start();
+    }
+
+    /// <summary>Into the app's daily log (data\logs), and on screen.</summary>
+    private static void Report(string what, Exception ex)
+    {
+        new Odx.Core.DailyLogFile(Odx.Core.PackageFolders.Logs).Write($"{what}: {ex}");
+        MessageBox.Show($"Odx Capture: {what}\n\n{ex.Message}\n\nDetails: {Odx.Core.PackageFolders.Logs}",
+            "Odx Capture - error", MessageBoxButton.OK, MessageBoxImage.Error);
     }
 }

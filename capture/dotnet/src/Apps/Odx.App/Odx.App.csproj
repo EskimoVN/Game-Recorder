@@ -14,6 +14,8 @@
   </PropertyGroup>
   <ItemGroup>
     <Resource Include="odx.ico" />
+    <!-- Window background (Dango theme): dark, faint glow top right; text sits on opaque cards above it. -->
+    <Resource Include="bg.jpg" />
     <!-- Shown by WPF as soon as the runtime starts, before the main window is built; fades out when it appears. -->
     <SplashScreen Include="splash.png" />
   </ItemGroup>

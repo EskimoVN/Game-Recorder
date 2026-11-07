@@ -38,7 +38,12 @@ public partial class MainWindow : Window
     private const uint MOD_NOREPEAT = 0x4000;
     private const int CountdownSeconds = 3;
     private const int MaxVideosPerBatch = 15;
-    private const uint WDA_EXCLUDEFROMCAPTURE = 0x11;  // Windows 10 2004+
+    /// <summary>A task ID the orchestrator already has (e.g. a bad take whose folder was deleted) is recorded as
+    /// &lt;id&gt;-retake2, -retake3, …; each PC renames the folder back to &lt;id&gt; when that name is free there.</summary>
+    private const string RetakeSuffix = "-retake";
+    private const int MaxRetake = 9;
+    private const uint WDA_NONE = 0, WDA_EXCLUDEFROMCAPTURE = 0x11;  // Windows 10 2004+
+    private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
 
     private readonly AppSettings _settings = AppSettings.Load();
     private readonly CaptureConfig _config;
@@ -52,8 +57,8 @@ public partial class MainWindow : Window
     /// <summary>The task ID the host asked a round to start with; the video number advances once the room shows it started.</summary>
     private string? _pendingTask;
     private static readonly System.Windows.Media.SolidColorBrush
-        RecordTimerRunning = new(System.Windows.Media.Color.FromRgb(0xC6, 0x28, 0x28)),
-        RecordTimerStopped = new(System.Windows.Media.Color.FromRgb(0x6B, 0x64, 0x70));
+        RecordTimerRunning = new(System.Windows.Media.Color.FromRgb(0xF2, 0x54, 0x50)),
+        RecordTimerStopped = new(System.Windows.Media.Color.FromRgb(0x8A, 0x91, 0xA0));
     private readonly Forms.NotifyIcon _tray = new();
     private readonly Forms.ToolStripMenuItem _trayStartStop = new(), _trayShow = new(), _trayExit = new();
     private Strings _t = Strings.En;
@@ -195,8 +200,10 @@ public partial class MainWindow : Window
     {
         base.OnSourceInitialized(e);
         _hwnd = new WindowInteropHelper(this).Handle;
-        // Recording a monitor must not show this window (its timer, the task ID) in the video; it stays visible on screen.
-        SetWindowDisplayAffinity(_hwnd, WDA_EXCLUDEFROMCAPTURE);
+        ExcludeFromCaptureUnlessIdle();
+        // Dark title bar to match the dark window (Windows 10 2004+; older builds ignore it).
+        int dark = 1;
+        DwmSetWindowAttribute(_hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ref dark, sizeof(int));
         HwndSource.FromHwnd(_hwnd).AddHook(WndProc);
         RegisterHotkey();
     }
@@ -400,7 +407,17 @@ public partial class MainWindow : Window
         // In a room the orchestrator's game profile and frame rate apply.
         GameLabel.Visibility = GameBox.Visibility = FpsLabel.Visibility = FpsBox.Visibility = inRoom ? Visibility.Collapsed : Visibility.Visible;
         RefreshButton.IsEnabled = idle;
-        _tray.Text = idle ? "Dango Capture" : _t.TrayTooltip(_trayStartStop.Text);
+        _tray.Text = idle ? "Odx Capture" : _t.TrayTooltip(_trayStartStop.Text);
+        ExcludeFromCaptureUnlessIdle();
+    }
+
+    /// <summary>
+    /// Out of screen capture whenever a recording can run (3-2-1, recording, stopping, in a room), so recording a monitor
+    /// never shows this window (its timer, the task ID); idle, it can be captured (screenshots, screen sharing for help).
+    /// </summary>
+    private void ExcludeFromCaptureUnlessIdle()
+    {
+        if (_hwnd != IntPtr.Zero) SetWindowDisplayAffinity(_hwnd, _state == RunState.Idle ? WDA_NONE : WDA_EXCLUDEFROMCAPTURE);
     }
 
     private void BeginCountdown()
@@ -647,7 +664,7 @@ public partial class MainWindow : Window
         {
             if (_room != room) return;
             bool ok = result.CaptureOk;
-            string dir = result.SessionDir;
+            string dir = RenameRetakeFolder(result.SessionDir);
             _roundResult = ok ? t => t.RoundKept(session, dir) : t => t.RoundCaptureFailed(session, dir);
             ToastOverlay.Notify(ok, _roundResult(_t));
             if (_run is null) ShowAgentStatus();
@@ -684,7 +701,15 @@ public partial class MainWindow : Window
             else
             {
                 SetStatus(_ => error);
-                if (agent.IsHost)
+                if (agent.IsHost && _pendingTask is { } pending && error == $"task id '{pending}' was already used" &&
+                    NextRetake(pending) is { } retake)
+                {
+                    // The orchestrator keeps every task ID it has seen: the round starts again under a retake name.
+                    _pendingTask = retake;
+                    ToastOverlay.Notify(true, _t.TaskRetake(BaseTask(pending), retake));
+                    SendToggleRound(room, retake);
+                }
+                else if (agent.IsHost)
                 {
                     _pendingTask = null;
                     ToastOverlay.Notify(false, error);  // e.g. the round refused: the host is in game
@@ -859,6 +884,7 @@ public partial class MainWindow : Window
     {
         _pendingTask = null;
         // From the started ID, not the boxes: the host may have typed in them since pressing the hotkey.
+        started = BaseTask(started);
         int cut = started.LastIndexOf("-S", StringComparison.Ordinal);
         _settings.TaskBatch = started[..cut];
         _settings.TaskVideo = int.Parse(started[(cut + 2)..], System.Globalization.CultureInfo.InvariantCulture) + 1;
@@ -883,6 +909,11 @@ public partial class MainWindow : Window
             }
             _pendingTask = task;
         }
+        SendToggleRound(room, task);
+    }
+
+    private async void SendToggleRound(RoomSession room, string? task)
+    {
         try
         {
             await room.ToggleRoundAsync(CountdownSeconds * 1000, task);
@@ -892,6 +923,43 @@ public partial class MainWindow : Window
             _pendingTask = null;
             string error = e.Message;
             SetStatus(t => t.RoundToggleFailed(error));
+        }
+    }
+
+    /// <summary>The task ID without its retake suffix: AMRF-001-S01-retake2 → AMRF-001-S01.</summary>
+    private static string BaseTask(string task)
+    {
+        int cut = task.LastIndexOf(RetakeSuffix, StringComparison.Ordinal);
+        return cut > 0 && int.TryParse(task[(cut + RetakeSuffix.Length)..], System.Globalization.NumberStyles.None,
+            System.Globalization.CultureInfo.InvariantCulture, out _) ? task[..cut] : task;
+    }
+
+    /// <summary>The next retake name for <paramref name="task"/>, or null past <see cref="MaxRetake"/>.</summary>
+    private static string? NextRetake(string task)
+    {
+        string baseTask = BaseTask(task);
+        int n = task == baseTask ? 2 : int.Parse(task[(baseTask.Length + RetakeSuffix.Length)..], System.Globalization.CultureInfo.InvariantCulture) + 1;
+        string retake = $"{baseTask}{RetakeSuffix}{n}";
+        return n <= MaxRetake && Odx.Protocol.ToggleRound.IsValidSessionId(retake) ? retake : null;
+    }
+
+    /// <summary>A retake's folder takes the task's own name when no folder has it on this PC (the bad take deleted).</summary>
+    private string RenameRetakeFolder(string dir)
+    {
+        string name = Path.GetFileName(dir), baseName = BaseTask(name);
+        if (baseName == name) return dir;
+        string target = Path.Combine(Path.GetDirectoryName(dir)!, baseName);
+        if (Directory.Exists(target)) return dir;
+        try
+        {
+            Directory.Move(dir, target);
+            _log.Write($"{name}: folder renamed to {baseName}");
+            return target;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            _log.Write($"{name}: folder not renamed to {baseName}: {e.Message}");
+            return dir;
         }
     }
 
@@ -1045,4 +1113,7 @@ public partial class MainWindow : Window
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint dwAffinity);
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
 }

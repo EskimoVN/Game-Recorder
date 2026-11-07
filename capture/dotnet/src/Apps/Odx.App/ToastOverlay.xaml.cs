@@ -22,7 +22,7 @@ public partial class ToastOverlay : Window
         toast.TitleText.Text = title;
         toast.BodyText.Text = body ?? "";
         toast.BodyText.Visibility = body is null ? Visibility.Collapsed : Visibility.Visible;
-        toast.Accent.Background = new SolidColorBrush(ok ? Color.FromRgb(0x5D, 0xBB, 0x7E) : Color.FromRgb(0xE0, 0x4B, 0x4B));
+        toast.Accent.Background = new SolidColorBrush(ok ? Color.FromRgb(0x5C, 0xB8, 0x80) : Color.FromRgb(0xF2, 0x54, 0x50));
         toast.Loaded += (_, _) =>
         {
             var area = SystemParameters.WorkArea;
