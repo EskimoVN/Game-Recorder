@@ -107,7 +107,7 @@ gets its leftovers. Fixes, in order:
    this; run a solo test with `odx record` to see whether it keeps up).
 
 The pre-round check that catches this before a real round: the host runs a 1-minute test round and reads the notice;
-every player with `degraded` or `failed` is named on every machine.
+every player with `degraded` or `failed` is named on every machine (`all OK` otherwise).
 
 ## Reporting a failed or degraded round
 

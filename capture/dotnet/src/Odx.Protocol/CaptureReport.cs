@@ -46,12 +46,12 @@ public sealed record CaptureReport(long Frames, long? RoundFrames, double Fps, l
         var problems = new List<string>();
         if (Failure is not null) problems.Add(Failure);
         else if (!Video) problems.Add("no video");
-        if (RoundFrames is long n && Frames < n) problems.Add($"{Frames} of the round's {n} frames");
+        if (RoundFrames is long n && Frames < n) problems.Add($"{Frames}/{n} frames");
         if (EncoderBehind(Frames, Duplicates, Starved, Fps) is { } encoder) problems.Add(encoder);
         if (LateStart(LeadingBlack, Fps) is { } late) problems.Add(late);
-        if (GridOrigin is { } origin && origin != Aligned) problems.Add($"video not aligned to round_start ({origin})");
+        if (GridOrigin is { } origin && origin != Aligned) problems.Add($"not aligned: {origin}");
         else if (GridOriginOffsetMs is double off && Math.Abs(off) > MaxGridOriginOffsetMs)
-            problems.Add($"frame 0 is {off:+0;-0} ms from round_start");
+            problems.Add($"frame 0 off round_start by {off:+0;-0} ms");
         if (AudioError is not null) problems.Add($"audio: {AudioError}");
         return problems;
     }
@@ -63,9 +63,9 @@ public sealed record CaptureReport(long Frames, long? RoundFrames, double Fps, l
     private static string? EncoderBehind(long frames, long duplicates, long starved, double fps)
     {
         if (frames < SettleSeconds * fps || starved <= MaxStarvedRatio * frames) return null;
-        return $"encoder behind: {starved} captured frames dropped waiting for it, {100.0 * duplicates / frames:0} % of the video duplicated";
+        return $"encoder behind: {starved} frames dropped, {100.0 * duplicates / frames:0} % duplicated";
     }
 
     private static string? LateStart(long leadingBlack, double fps) =>
-        fps > 0 && leadingBlack > fps / 2 ? $"started late: {leadingBlack} black frames ({leadingBlack / fps:0.0} s)" : null;
+        fps > 0 && leadingBlack > fps / 2 ? $"late start: {leadingBlack / fps:0.0} s black" : null;
 }

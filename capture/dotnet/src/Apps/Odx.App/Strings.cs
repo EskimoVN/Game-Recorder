@@ -243,8 +243,8 @@ public sealed class Strings
         RoomStatus = (code, host, members) => $"Room {code}{(host ? " · you are the host: share this invite code" : "")}\nPlayers: {members}",
         MemberState = state => state switch { "starting" => " · starting", "recording" => " · recording", "saving" => " · saving…", _ => "" },
         RoundVerdict = (session, failed, degraded) =>
-            failed.Count == 0 && degraded.Count == 0 ? $"✓ Round {session}: every player kept it" :
-            (failed.Count > 0 ? $"✗ Round {session} · RECORD AGAIN" : $"⚠ Round {session} · saved, check") +
+            failed.Count == 0 && degraded.Count == 0 ? $"✓ Round {session}: all OK" :
+            (failed.Count > 0 ? $"✗ Round {session}: RECORD AGAIN" : $"⚠ Round {session}: saved, check") +
             string.Concat(failed.Select(f => $"\n  {f}")) + string.Concat(degraded.Select(d => $"\n  {d}")),
         StartRound = hotkey => $"Start round ({hotkey})",
         WaitingReady = (ready, others) => $"Waiting for players to be ready ({ready}/{others})",
@@ -396,8 +396,8 @@ public sealed class Strings
         RoomStatus = (code, host, members) => $"Room {code}{(host ? " · bạn là host: gửi mã mời này cho mọi người" : "")}\nNgười chơi: {members}",
         MemberState = state => state switch { "starting" => " · đang khởi động", "recording" => " · đang ghi", "saving" => " · đang lưu…", _ => "" },
         RoundVerdict = (session, failed, degraded) =>
-            failed.Count == 0 && degraded.Count == 0 ? $"✓ Round {session}: mọi người đều ghi tốt" :
-            (failed.Count > 0 ? $"✗ Round {session} · QUAY LẠI" : $"⚠ Round {session} · đã lưu, cần xem") +
+            failed.Count == 0 && degraded.Count == 0 ? $"✓ Round {session}: tất cả OK" :
+            (failed.Count > 0 ? $"✗ Round {session}: QUAY LẠI" : $"⚠ Round {session}: đã lưu, cần xem") +
             string.Concat(failed.Select(f => $"\n  {f}")) + string.Concat(degraded.Select(d => $"\n  {d}")),
         StartRound = hotkey => $"Bắt đầu round ({hotkey})",
         WaitingReady = (ready, others) => $"Chờ mọi người sẵn sàng ({ready}/{others})",

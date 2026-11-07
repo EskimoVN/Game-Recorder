@@ -37,8 +37,8 @@ public static class GridOrigin
                 error = e.Message;
             }
         }
-        if (best is null) return (null, null, $"free: the time service {timeServer} did not answer ({error})");
-        if (best.RttMs > MaxRttMs) return (null, best.RttMs, $"free: time service RTT {best.RttMs:F0} ms, over {MaxRttMs:F0} ms");
+        if (best is null) return (null, null, $"time service silent ({error})");
+        if (best.RttMs > MaxRttMs) return (null, best.RttMs, $"time service RTT {best.RttMs:F0} ms, over {MaxRttMs:F0}");
         return (best.TQpcMs + (roundStartUtcMs - best.UtcUnixMs), best.RttMs, Aligned);
     }
 }

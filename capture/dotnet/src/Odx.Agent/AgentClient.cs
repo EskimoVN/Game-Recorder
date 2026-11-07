@@ -566,7 +566,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
         await SendAsync(new AgentState("recording", s.SessionId), stop);
         run.ProblemChanged += problem =>
         {
-            Log?.Invoke(problem is null ? $"{s.SessionId}: recording well again" : $"{s.SessionId}: {problem}");
+            Log?.Invoke($"{s.SessionId}: {problem ?? "problem cleared"}");
             _ = SendAsync(new AgentState(run.Phase == CapturePhase.Recording ? "recording" : "saving", s.SessionId, problem), stop);
         };
         Log?.Invoke($"recording {s.SessionId} into {run.SessionDir}");
@@ -701,7 +701,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
     public static string RoundSummary(RoundRecord record)
     {
         var bad = record.Players.Where(p => p.Verdict is not CaptureReport.Ok).ToList();
-        if (bad.Count == 0) return $"round {record.SessionId}: every player ok";
+        if (bad.Count == 0) return $"round {record.SessionId}: all ok";
         bool again = bad.Any(p => p.Verdict == CaptureReport.Failed);
         return $"round {record.SessionId}: {(again ? "RECORD AGAIN" : "saved, check")} · " +
                string.Join(" · ", bad.Select(p => $"{p.Name}: {p.Verdict ?? "not done"}" +

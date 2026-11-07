@@ -232,13 +232,12 @@ public sealed class OrchestratorTests : IAsyncLifetime
         Assert.Equal(1000, record.CountdownMs);
         var slow = record.Players.Single(p => p.PlayerId == "slow");
         Assert.Equal(CaptureReport.Degraded, slow.Verdict);
-        Assert.Equal(["encoder behind: 435 captured frames dropped waiting for it, 97 % of the video duplicated"], slow.Problems);
+        Assert.Equal(["encoder behind: 435 frames dropped, 97 % duplicated"], slow.Problems);
         Assert.Equal(1416, slow.Report!.Frames);
         var fine = record.Players.Single(p => p.PlayerId == "fine");
         Assert.Equal(CaptureReport.Ok, fine.Verdict);
         Assert.Empty(fine.Problems!);
-        Assert.Equal("round m2-r01: saved, check · SLOW: degraded, encoder behind: 435 captured frames dropped waiting for it, 97 % of the video duplicated",
-            AgentClient.RoundSummary(record));
+        Assert.Equal("round m2-r01: saved, check · SLOW: degraded, encoder behind: 435 frames dropped, 97 % duplicated", AgentClient.RoundSummary(record));
         var status = await RoomStatus();
         Assert.All(status["members"]!.AsArray(), m => Assert.Null(m!["problem"]));
     }
@@ -302,10 +301,11 @@ public sealed class OrchestratorTests : IAsyncLifetime
             Assert.True((double)countdown["video_time_ms"]! < 0);
             var player = JsonNode.Parse(File.ReadAllText(Path.Combine(dir, "players", p, "player.json")))!;
             var roundStart = events.Single(e => GameEvents.Type(e) == "round_start");
-            // Frame 0 is the first frame at or after round_start, so the event itself falls within one frame before it.
+            // Frame 0 is the frame nearest round_start: the event falls within one frame before it (no frame on screen
+            // yet) or within half a frame after it (frame 0 on screen).
             Assert.Equal(0, (int)player["round_start_frame"]!);
-            Assert.Null(roundStart["frame_index"]);
-            Assert.InRange((double)roundStart["video_time_ms"]!, -1000.0 / SessionFixtures.Fps, 0);
+            Assert.True(roundStart["frame_index"] is null || (int)roundStart["frame_index"]! == 0);
+            Assert.InRange((double)roundStart["video_time_ms"]!, -1000.0 / SessionFixtures.Fps, 500.0 / SessionFixtures.Fps);
 
             var (header, frames) = FramesBin.Read(Path.Combine(dir, "players", p, FramesBin.FileName));
             Assert.Equal("odx.capture.v1.FrameRecord", header.RecordType);

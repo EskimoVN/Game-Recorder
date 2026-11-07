@@ -22,7 +22,7 @@ public class CaptureReportTests
     {
         var r = Report(frames: 1416, duplicates: 1430 * 1416 / 1475, starved: 435);
         Assert.Equal(CaptureReport.Degraded, r.Verdict);
-        Assert.Equal(["encoder behind: 435 captured frames dropped waiting for it, 97 % of the video duplicated"], r.Problems());
+        Assert.Equal(["encoder behind: 435 frames dropped, 97 % duplicated"], r.Problems());
     }
 
     [Fact]
@@ -38,7 +38,7 @@ public class CaptureReportTests
     {
         var r = Report(frames: 900);
         Assert.Equal(CaptureReport.Failed, r.Verdict);
-        Assert.Equal(["900 of the round's 1416 frames"], r.Problems());
+        Assert.Equal(["900/1416 frames"], r.Problems());
         Assert.Equal(CaptureReport.Failed, Report(video: false).Verdict);
         Assert.Equal(CaptureReport.Failed, Report(failure: "odx record did not stop within 60 s; killed").Verdict);
     }
@@ -46,10 +46,9 @@ public class CaptureReportTests
     [Fact]
     public void A_late_start_a_free_grid_an_offset_and_an_audio_error_degrade()
     {
-        Assert.Equal(["started late: 30 black frames (1.0 s)"], Report(black: 30).Problems());
-        Assert.Equal(["video not aligned to round_start (free: time service RTT 180 ms, over 100 ms)"],
-            Report(origin: "free: time service RTT 180 ms, over 100 ms", offset: null).Problems());
-        Assert.Equal(["frame 0 is +41 ms from round_start"], Report(offset: 41.2).Problems());
+        Assert.Equal(["late start: 1.0 s black"], Report(black: 30).Problems());
+        Assert.Equal(["not aligned: time service RTT 180 ms, over 100"], Report(origin: "time service RTT 180 ms, over 100", offset: null).Problems());
+        Assert.Equal(["frame 0 off round_start by +41 ms"], Report(offset: 41.2).Problems());
         Assert.Equal(["audio: audio file not written out within 5 s"], Report(audioError: "audio file not written out within 5 s").Problems());
         Assert.Equal(CaptureReport.Degraded, Report(black: 30).Verdict);
         Assert.Equal(CaptureReport.Ok, Report(black: 10).Verdict);  // a third of a second: within the countdown's slack
@@ -60,8 +59,8 @@ public class CaptureReportTests
     {
         Assert.Null(CaptureReport.LiveProblem(frames: 150, duplicates: 149, starved: 100, leadingBlack: 0, fps: 30));
         Assert.Null(CaptureReport.LiveProblem(300, 280, 0, 0, 30));  // duplicated, nothing starved: a still screen
-        Assert.Equal("encoder behind: 40 captured frames dropped waiting for it, 3 % of the video duplicated", CaptureReport.LiveProblem(300, 10, 40, 0, 30));
-        Assert.Equal("started late: 20 black frames (0.7 s)", CaptureReport.LiveProblem(300, 0, 0, 20, 30));
+        Assert.Equal("encoder behind: 40 frames dropped, 3 % duplicated", CaptureReport.LiveProblem(300, 10, 40, 0, 30));
+        Assert.Equal("late start: 0.7 s black", CaptureReport.LiveProblem(300, 0, 0, 20, 30));
         Assert.Null(CaptureReport.LiveProblem(300, 10, 5, 0, 30));
     }
 

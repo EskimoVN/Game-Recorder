@@ -143,9 +143,9 @@ public sealed class CaptureRun : ICaptureRun
         if (options.RoundStartUtcMs is double roundStart)
         {
             _roundStartUtcMs = roundStart;
-            if (string.IsNullOrWhiteSpace(options.NtpServer)) _gridOrigin = "free: no time service";
+            if (string.IsNullOrWhiteSpace(options.NtpServer)) _gridOrigin = "no time service";
             else (originQpcMs, _originRttMs, _gridOrigin) = GridOrigin.Measure(options.NtpServer.Trim(), roundStart);
-            if (originQpcMs is null) _stderr.Add($"video grid not aligned to the round's start ({_gridOrigin})");
+            if (originQpcMs is null) _stderr.Add($"video not aligned to round_start: {_gridOrigin}");
         }
 
         var inputArgs = new List<string> { "--out", SessionDir, "--stop-event", stopName };
