@@ -52,6 +52,8 @@ public static class RecordCommand
     private static readonly TimeSpan StopWatchdog = TimeSpan.FromSeconds(40);
     /// <summary>How long the stop waits for a capture callback in progress to let go of the gate.</summary>
     private static readonly TimeSpan GateWait = TimeSpan.FromSeconds(5);
+    /// <summary>How long the stop waits for WGC's session and frame pool to close (an RPC to the capture service).</summary>
+    private static readonly TimeSpan TeardownWait = TimeSpan.FromSeconds(3);
 
     public static int Run(string[] args)
     {
@@ -214,7 +216,7 @@ public static class RecordCommand
             shown = next;
         }
 
-        long sourceFrames = 0, starvedFrames = 0, readbackMs = 0, readbackMaxMs = 0;
+        long sourceFrames = 0, starvedFrames = 0, readbackMs = 0, readbackMaxMs = 0, stopLeftOutFrames = 0;
         void ShowPending()
         {
             if (pending is not { } p) return;
@@ -337,7 +339,7 @@ public static class RecordCommand
         audio?.End(stopQpcMs);  // the sound ends here, whatever the video's drain takes
         var stopClock = Stopwatch.StartNew();
         var phase = Stopwatch.StartNew();
-        string[] stopStep = ["last frames"];
+        string[] stopStep = ["stop signal"];
         bool[] drained = [false];
         void Step(string name) => Volatile.Write(ref stopStep[0], name);
 
@@ -364,6 +366,7 @@ public static class RecordCommand
             ["leading_black_frames"] = resampler.LeadingBlackFrames,
             ["source_frames"] = sourceFrames,
             ["starved_frames"] = starvedFrames,
+            ["stop_left_out_frames"] = stopLeftOutFrames,
             ["encode_write_ms"] = writer?.WriteMs,
             ["encode_write_max_ms"] = writer?.WriteMaxMs,
             ["readback_ms"] = readbackMs,
@@ -417,27 +420,21 @@ public static class RecordCommand
         }
         using var watchdog = new Timer(_ => EndWithWhatIsOnDisk(), null, StopWatchdog, Timeout.InfiniteTimeSpan);
 
-        // A capture callback in progress holds the gate; one stuck in a readback must not hold up the stop: past GateWait
-        // the last frames are given up and the queued ones are drained as usual.
+        // Lock order: WGC can raise FrameArrived while it holds the D3D device lock (Windows 10), and the callback then waits
+        // for the gate; so the stop makes no D3D call while it holds the gate (a readback there hung until the watchdog,
+        // 'last frames'). Under the gate it only marks the stop: the frame still in the GPU readback is left out and the
+        // grid shows the one before it up to the stop. A callback stuck past GateWait is given up.
         Step("capture callback");
-        bool locked = false;
+        bool locked = false, finishGrid = false;
         try
         {
             Monitor.TryEnter(gate, GateWait, ref locked);
             if (locked)
             {
-                if (encoder is null)
-                {
-                    Step("start encoder (no frame was captured)");
-                    encoder = StartEncoder();
-                }
-                Step("last frames");
-                if (!stopped)
-                {
-                    stopped = true;
-                    ShowPending();
-                    Emit(resampler.Finish(stopQpcMs), null);
-                }
+                finishGrid = !stopped;
+                stopped = true;
+                if (pending is not null) stopLeftOutFrames++;
+                pending = null;
             }
             else
             {
@@ -450,6 +447,14 @@ public static class RecordCommand
         {
             if (locked) Monitor.Exit(gate);
         }
+        // From here no callback touches the converter, the encoder or the grid: they return on 'stopped'.
+        if (locked && encoder is null)
+        {
+            Step("start encoder (no frame was captured)");
+            encoder = StartEncoder();
+        }
+        Step("last frames");
+        if (finishGrid) Emit(resampler.Finish(stopQpcMs), null);
         if (writer is null || encoder is null)
         {
             Step("capture callback (no frame written yet)");
@@ -463,10 +468,12 @@ public static class RecordCommand
         long drainMs = phase.ElapsedMilliseconds;
         Step("frame log");
         frameLog.Flush();
+        // Every frame has reached ffmpeg (or the drain gave up). WGC's close can hang on Windows 10 (the source's process
+        // gone): it gets a few seconds and is otherwise left to the process exit.
         Step("capture session");
-        session.Dispose();
+        if (!Bounded(session.Dispose, TeardownWait)) Console.Error.WriteLine($"capture session did not close within {TeardownWait.TotalSeconds:0} s");
         Step("frame pool");
-        framePool.Dispose();
+        if (!Bounded(framePool.Dispose, TeardownWait)) Console.Error.WriteLine($"frame pool did not close within {TeardownWait.TotalSeconds:0} s");
         phase.Restart();
         Step("ffmpeg input");
         encoder.EndVideo();  // ffmpeg flushes the encoder while the audio file is padded and closed
@@ -510,6 +517,9 @@ public static class RecordCommand
         if (error is not null) Console.Error.WriteLine(error);
         return error is null && ffmpegExit == 0 ? 0 : 1;
     }
+
+    /// <summary>Runs <paramref name="action"/> on the thread pool; false when it has not returned within <paramref name="wait"/>.</summary>
+    private static bool Bounded(Action action, TimeSpan wait) => Task.Run(action).Wait(wait);
 
     private static int RunObs(Options opts, string address)
     {

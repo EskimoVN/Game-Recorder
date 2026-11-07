@@ -5,13 +5,14 @@ name: Build Eskimo capture package
 # (capture/dotnet/build-package.ps1). Publishes a GitHub release eskimo-capture-v<version> with the full package and
 # the update (the two executables only). The tag does not match capture-v*, so release-capture.yml does not run.
 on:
+  # A push to eskimo-<version> publishes that version (eskimo-0.2.10 -> eskimo-capture-v0.2.10).
   push:
-    branches: [eskimo-0.2.9]
+    branches: ['eskimo-*']
   workflow_dispatch:
     inputs:
       version:
-        description: Package version
-        default: '0.2.9'
+        description: Package version (empty = from the branch name eskimo-<version>)
+        default: ''
       base:
         description: Upstream release used as the base package
         default: capture-v0.2.8
@@ -23,10 +24,20 @@ jobs:
   package:
     runs-on: windows-latest
     env:
-      VERSION: ${{ inputs.version || '0.2.9' }}
+      INPUT_VERSION: ${{ inputs.version || '' }}
       BASE_TAG: ${{ inputs.base || 'capture-v0.2.8' }}
       GH_TOKEN: ${{ github.token }}
     steps:
+      - name: Version from the branch
+        shell: pwsh
+        run: |
+          $version = $env:INPUT_VERSION
+          if (-not $version) {
+            if ($env:GITHUB_REF_NAME -notmatch '^eskimo-(\d+\.\d+\.\d+)$') { throw "branch $env:GITHUB_REF_NAME is not eskimo-<version>" }
+            $version = $Matches[1]
+          }
+          "VERSION=$version" >> $env:GITHUB_ENV
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-dotnet@v4
@@ -41,7 +52,7 @@ jobs:
         shell: pwsh
         run: |
           $base = (Get-ChildItem base -Filter '*.zip' | Select-Object -First 1).FullName
-          ./capture/dotnet/build-package.ps1 -Base $base -Version $env:VERSION
+          ./capture/dotnet/build-package.ps1 -Base $base -Version $env:VERSION -Launcher
 
       - name: Publish the release
         shell: pwsh

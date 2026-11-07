@@ -53,7 +53,7 @@ public partial class MainWindow : Window
     private string? _pendingTask;
     private static readonly System.Windows.Media.SolidColorBrush
         RecordTimerRunning = new(System.Windows.Media.Color.FromRgb(0xC6, 0x28, 0x28)),
-        RecordTimerStopped = new(System.Windows.Media.Color.FromRgb(0x5F, 0x63, 0x68));
+        RecordTimerStopped = new(System.Windows.Media.Color.FromRgb(0x6B, 0x64, 0x70));
     private readonly Forms.NotifyIcon _tray = new();
     private readonly Forms.ToolStripMenuItem _trayStartStop = new(), _trayShow = new(), _trayExit = new();
     private Strings _t = Strings.En;
@@ -86,6 +86,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        Overlay.Log = _log.Write;
         _obsRows = _settings.RecordWithObs;
         _t = Strings.For(_settings.Language ?? Strings.DefaultLanguage);
         string? configError = null;

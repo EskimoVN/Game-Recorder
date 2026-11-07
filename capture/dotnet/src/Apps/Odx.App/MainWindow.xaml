@@ -1,9 +1,23 @@
 <Window x:Class="Odx.App.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Odx Capture" Icon="odx.ico" Width="560" SizeToContent="Height" ResizeMode="CanMinimize"
-        WindowStartupLocation="CenterScreen">
+        Title="Dango Capture" Icon="odx.ico" Width="560" SizeToContent="Height" ResizeMode="CanMinimize"
+        WindowStartupLocation="CenterScreen" Style="{StaticResource DangoWindow}">
     <!-- Texts come from Strings (English / Vietnamese), set in code-behind. -->
+    <DockPanel>
+    <Border DockPanel.Dock="Top" Background="{StaticResource MistBrush}"
+            BorderBrush="{StaticResource HeaderLineBrush}" BorderThickness="0,0,0,1" Padding="16,10">
+        <StackPanel Orientation="Horizontal">
+            <!-- Dango glyph: pink, white and green dumplings on a skewer. Decorative. -->
+            <Canvas Width="38" Height="14" Margin="0,0,10,0" VerticalAlignment="Center">
+                <Rectangle Canvas.Top="6" Width="38" Height="2" RadiusX="1" RadiusY="1" Fill="{StaticResource StickBrush}" />
+                <Ellipse Canvas.Left="2" Canvas.Top="1" Width="12" Height="12" Fill="{StaticResource SakuraBrush}" Stroke="#D9849A" />
+                <Ellipse Canvas.Left="13" Canvas.Top="1" Width="12" Height="12" Fill="#FFFFFF" Stroke="#CFC2C8" />
+                <Ellipse Canvas.Left="24" Canvas.Top="1" Width="12" Height="12" Fill="{StaticResource YomogiBrush}" Stroke="#7FB37A" />
+            </Canvas>
+            <TextBlock FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center"><Run Text="Dango" Foreground="{StaticResource AccentBrush}" /><Run Text=" Capture" /></TextBlock>
+        </StackPanel>
+    </Border>
     <Grid Margin="16">
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="Auto" />
@@ -25,11 +39,11 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
         <Grid.Resources>
-            <Style TargetType="Label">
+            <Style TargetType="Label" BasedOn="{StaticResource {x:Type Label}}">
                 <Setter Property="Margin" Value="0,0,8,6" />
                 <Setter Property="VerticalAlignment" Value="Center" />
             </Style>
-            <Style TargetType="Button">
+            <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
                 <Setter Property="Margin" Value="6,0,0,6" />
                 <Setter Property="Padding" Value="10,2" />
             </Style>
@@ -112,19 +126,21 @@
                  PreviewKeyDown="Hotkey_PreviewKeyDown" />
 
         <Button x:Name="StartStopButton" AutomationProperties.AutomationId="StartStopButton" Grid.Row="9"
-                Grid.ColumnSpan="3" Margin="0,8,0,8" Padding="0,8" FontSize="14" Click="StartStop_Click" />
+                Grid.ColumnSpan="3" Margin="0,8,0,8" Padding="0,8" FontSize="14" Click="StartStop_Click"
+                Style="{StaticResource PrimaryButton}" />
 
         <!-- Recording time: red with a dot while it runs, grey once stopped (keeps the last recording's length).
              The dot is Hidden, not Collapsed, so the digits do not shift when it appears. -->
         <StackPanel x:Name="RecordTimerPanel" Grid.Row="10" Grid.ColumnSpan="3" Orientation="Horizontal"
-                    HorizontalAlignment="Center" Margin="0,0,0,8">
-            <Ellipse x:Name="RecordTimerDot" Width="14" Height="14" Fill="#C62828" Margin="0,0,10,0"
+                    HorizontalAlignment="Left" Margin="0,0,0,8">
+            <Ellipse x:Name="RecordTimerDot" Width="14" Height="14" Fill="{StaticResource RecordBrush}" Margin="0,0,10,0"
                      VerticalAlignment="Center" Visibility="Hidden" />
             <TextBlock x:Name="RecordTimerText" AutomationProperties.AutomationId="RecordTimerText" Text="00:00:00"
-                       FontFamily="Consolas" FontSize="32" FontWeight="SemiBold" Foreground="#5F6368" />
+                       FontFamily="Consolas" FontSize="32" FontWeight="SemiBold" Foreground="{StaticResource MutedBrush}" />
         </StackPanel>
 
         <TextBlock x:Name="StatusText" AutomationProperties.AutomationId="StatusText" Grid.Row="11"
                    Grid.ColumnSpan="3" TextWrapping="Wrap" />
     </Grid>
+    </DockPanel>
 </Window>
