@@ -55,7 +55,17 @@ internal sealed class FrameWriter
     /// Queues <paramref name="ticks"/>, all showing <paramref name="frame"/>, which returns to the pool after; null shows
     /// black (ticks before the first captured frame).
     /// </summary>
-    public void Submit(byte[]? frame, IReadOnlyList<GridTick> ticks) => _queue.Add((frame, ticks));
+    public void Submit(byte[]? frame, IReadOnlyList<GridTick> ticks)
+    {
+        try
+        {
+            _queue.Add((frame, ticks));
+        }
+        catch (InvalidOperationException)
+        {
+            // After Complete: a capture callback that was stuck past the stop got here late; its frame is left out.
+        }
+    }
 
     /// <summary>
     /// Writes what is queued; <see cref="Submit"/> may not be called after. False when ffmpeg did not take it all within

@@ -112,6 +112,11 @@ public sealed class Strings
     public required string TaskId { get; init; }
     public required string TaskIdTooltip { get; init; }
     public required string TaskIdRequired { get; init; }
+    public required string RecordTimerTooltip { get; init; }
+    public required string TaskBatchMissing { get; init; }
+    public required string TaskBatchInvalid { get; init; }
+    public required Func<string, string> TaskBatchFull { get; init; }
+    public required string TaskNotStarted { get; init; }
     public required Func<string, string> EndRound { get; init; }
     public required Func<string, string> ReadyButton { get; init; }
     public required Func<string, string> UnreadyButton { get; init; }
@@ -251,6 +256,11 @@ public sealed class Strings
         WaitingSaving = saving => $"Waiting for {saving} player(s) to save the last round…",
         TaskId = "Task ID",
         TaskIdTooltip = "The round's name: every player's recording and the delivered session go into a folder of this name (letters, digits, _ . -; one per round)",
+        RecordTimerTooltip = "Recording time: runs from the first recorded frame (after the 3-2-1) until the recording stops",
+        TaskBatchMissing = "Type the batch code (e.g. AMRF-001) before starting the round",
+        TaskBatchInvalid = "Batch code: letters, digits, _ . - only, starting with a letter or digit, not ending with a dot",
+        TaskBatchFull = batch => $"Batch {batch} has its 15 videos: type the next batch code",
+        TaskNotStarted = "Round not started",
         TaskIdRequired = "Enter the task ID (the round's folder name: letters, digits, _ . -) before starting the round",
         EndRound = hotkey => $"End round ({hotkey})",
         ReadyButton = hotkey => $"I'm ready ({hotkey})",
@@ -404,6 +414,11 @@ public sealed class Strings
         WaitingSaving = saving => $"Chờ {saving} người lưu xong round trước…",
         TaskId = "Task ID",
         TaskIdTooltip = "Tên round: bản ghi của mọi người chơi và session giao đều nằm trong thư mục mang tên này (chữ, số, _ . -; mỗi round một tên)",
+        RecordTimerTooltip = "Thời gian quay: tính từ khung hình đầu tiên (sau 3-2-1) đến khi dừng quay",
+        TaskBatchMissing = "Nhập mã lô (ví dụ AMRF-001) rồi mới bắt đầu round",
+        TaskBatchInvalid = "Mã lô chỉ gồm chữ, số, _ . -, bắt đầu bằng chữ hoặc số, không kết thúc bằng dấu chấm",
+        TaskBatchFull = batch => $"Lô {batch} đã đủ 15 video: nhập mã lô tiếp theo",
+        TaskNotStarted = "Round chưa bắt đầu",
         TaskIdRequired = "Nhập Task ID (tên thư mục của round: chữ, số, _ . -) rồi mới bắt đầu round",
         EndRound = hotkey => $"Kết thúc round ({hotkey})",
         ReadyButton = hotkey => $"Tôi sẵn sàng ({hotkey})",

@@ -50,6 +50,8 @@ public static class RecordCommand
     private static readonly TimeSpan FfmpegExitTimeout = TimeSpan.FromSeconds(20);
     /// <summary>After the stop signal: past the limits above, a step that never returns ends the process (see the watchdog).</summary>
     private static readonly TimeSpan StopWatchdog = TimeSpan.FromSeconds(40);
+    /// <summary>How long the stop waits for a capture callback in progress to let go of the gate.</summary>
+    private static readonly TimeSpan GateWait = TimeSpan.FromSeconds(5);
 
     public static int Run(string[] args)
     {
@@ -107,6 +109,14 @@ public static class RecordCommand
             .CheckError();
         using var d3d = device!;
         var context = d3d.ImmediateContext;
+        // The frame pool is free-threaded: WGC and the capture callback use this device from different threads, which the
+        // immediate context allows only when multithread protected. Without it a readback (Map) can hang in the driver
+        // while the callback holds the gate, and the stop sticks in 'last frames' until the watchdog.
+        using (var multithread = d3d.QueryInterfaceOrNull<ID3D11Multithread>())
+        {
+            if (multithread is null) Console.Error.WriteLine("ID3D11Multithread not available: the D3D device is not multithread protected");
+            else multithread.SetMultithreadProtected(true);
+        }
         var winRtDevice = CaptureInterop.WinRtDevice(d3d);
         var framePool = Direct3D11CaptureFramePool.CreateFreeThreaded(
             winRtDevice, DirectXPixelFormat.B8G8R8A8UIntNormalized, 2, item.Size);
@@ -382,7 +392,7 @@ public static class RecordCommand
         // with what is on disk: recording.json and the stopped status say where it stuck, this process exits, ffmpeg
         // (a child with its own stdin pipe) sees the end of its input and finishes video_raw.mp4, and the capture host
         // finalizes it. The exit code is 0 when every frame had reached ffmpeg (the hang was in teardown).
-        using var watchdog = new Timer(_ =>
+        void EndWithWhatIsOnDisk()
         {
             string where = Volatile.Read(ref stopStep[0]);
             bool complete = Volatile.Read(ref drained[0]);
@@ -404,17 +414,47 @@ public static class RecordCommand
             Console.Out.Flush();
             Console.Error.Flush();
             Environment.Exit(complete ? 0 : 1);
-        }, null, StopWatchdog, Timeout.InfiniteTimeSpan);
+        }
+        using var watchdog = new Timer(_ => EndWithWhatIsOnDisk(), null, StopWatchdog, Timeout.InfiniteTimeSpan);
 
-        lock (gate)
+        // A capture callback in progress holds the gate; one stuck in a readback must not hold up the stop: past GateWait
+        // the last frames are given up and the queued ones are drained as usual.
+        Step("capture callback");
+        bool locked = false;
+        try
         {
-            encoder ??= StartEncoder();
-            if (!stopped)
+            Monitor.TryEnter(gate, GateWait, ref locked);
+            if (locked)
             {
-                stopped = true;
-                ShowPending();
-                Emit(resampler.Finish(stopQpcMs), null);
+                if (encoder is null)
+                {
+                    Step("start encoder (no frame was captured)");
+                    encoder = StartEncoder();
+                }
+                Step("last frames");
+                if (!stopped)
+                {
+                    stopped = true;
+                    ShowPending();
+                    Emit(resampler.Finish(stopQpcMs), null);
+                }
             }
+            else
+            {
+                Volatile.Write(ref stopped, true);  // a callback that gets the gate later returns at once
+                error ??= $"a capture callback held the capture for over {GateWait.TotalSeconds:0} s at the stop (stuck in a GPU readback); the last frames were left out";
+                Console.Error.WriteLine(error);
+            }
+        }
+        finally
+        {
+            if (locked) Monitor.Exit(gate);
+        }
+        if (writer is null || encoder is null)
+        {
+            Step("capture callback (no frame written yet)");
+            EndWithWhatIsOnDisk();  // exits the process
+            return 1;
         }
         Step("drain");
         drained[0] = writer!.Complete(DrainTimeout);
@@ -445,7 +485,7 @@ public static class RecordCommand
         Step("audio dispose");
         audio?.Dispose();
         Step("converter dispose");
-        converter?.Dispose();
+        if (locked) converter?.Dispose();  // else the stuck callback may still be using it; the process exit frees it
         Step("recording.json");
 
         var meta = Meta(framesWritten, ffmpegExit, stopTiming, error, audioStatus);

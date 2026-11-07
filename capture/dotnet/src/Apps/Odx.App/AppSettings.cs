@@ -30,6 +30,10 @@ public sealed class AppSettings
     /// Windows user name never stands in for them.</summary>
     public string PlayerId { get; set; } = "";
     public string PlayerName { get; set; } = "";
+    /// <summary>The host's batch code (e.g. AMRF-001): kept from round to round; the task ID is &lt;batch&gt;-S&lt;video&gt;.</summary>
+    public string TaskBatch { get; set; } = "";
+    /// <summary>The next video of the batch, 1..15; past 15 the batch is full until the host types a new batch code.</summary>
+    public int TaskVideo { get; set; } = 1;
 
     /// <param name="timeServer">time_server of odx-capture.json; null uses the Windows clock only.</param>
     /// <remarks>Recordings go to the package's data\captures\ (<see cref="PackageFolders"/>).</remarks>

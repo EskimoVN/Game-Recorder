@@ -37,12 +37,23 @@ public partial class MainWindow : Window
     private const int HotkeyId = 1;
     private const uint MOD_NOREPEAT = 0x4000;
     private const int CountdownSeconds = 3;
+    private const int MaxVideosPerBatch = 15;
+    private const uint WDA_EXCLUDEFROMCAPTURE = 0x11;  // Windows 10 2004+
 
     private readonly AppSettings _settings = AppSettings.Load();
     private readonly CaptureConfig _config;
     private readonly DailyLogFile _log = new(PackageFolders.Logs);
     private readonly bool _obsRows;
     private readonly DispatcherTimer _clock = new() { Interval = TimeSpan.FromSeconds(1) };
+    // Separate from _clock, which SetState stops outside RunState.Recording (a room stays in RunState.Agent).
+    private readonly DispatcherTimer _recordTimer = new() { Interval = TimeSpan.FromMilliseconds(250) };
+    /// <summary>What the recording time counts from while it runs; null once stopped. In a room: the end of the 3-2-1.</summary>
+    private DateTime? _recordFrom;
+    /// <summary>The task ID the host asked a round to start with; the video number advances once the room shows it started.</summary>
+    private string? _pendingTask;
+    private static readonly System.Windows.Media.SolidColorBrush
+        RecordTimerRunning = new(System.Windows.Media.Color.FromRgb(0xC6, 0x28, 0x28)),
+        RecordTimerStopped = new(System.Windows.Media.Color.FromRgb(0x5F, 0x63, 0x68));
     private readonly Forms.NotifyIcon _tray = new();
     private readonly Forms.ToolStripMenuItem _trayStartStop = new(), _trayShow = new(), _trayExit = new();
     private Strings _t = Strings.En;
@@ -98,11 +109,14 @@ public partial class MainWindow : Window
         HotkeyBox.Text = _settings.Hotkey.ToString();
         PlayerBox.Text = _settings.PlayerId;
         NameBox.Text = _settings.PlayerName;
+        VideoBox.ItemsSource = Enumerable.Range(1, MaxVideosPerBatch).Select(n => n.ToString("00")).ToList();
+        TaskBox.Text = _settings.TaskBatch;  // TaskBatch_Changed picks the batch's next video
         var roomRows = _config.Orchestrator is null ? Visibility.Collapsed : Visibility.Visible;
         PlayerLabel.Visibility = PlayerPanel.Visibility = RoomLabel.Visibility = RoomPanel.Visibility = roomRows;
         Loaded += async (_, _) => await RefreshWindowsAsync();
         Loaded += async (_, _) => await CheckEncoderAsync();
         _clock.Tick += (_, _) => ShowRecordingStatus();
+        _recordTimer.Tick += (_, _) => ShowRecordTimer();
 
         _trayStartStop.Click += (_, _) => Toggle();
         using (var icon = System.Windows.Application.GetResourceStream(new Uri("pack://application:,,,/odx.ico")).Stream)
@@ -130,7 +144,7 @@ public partial class MainWindow : Window
         NameBox.ToolTip = _t.PlayerNameTooltip;
         RoomLabel.Content = _t.Room;
         TaskLabel.Text = _t.TaskId;
-        TaskBox.ToolTip = _t.TaskIdTooltip;
+        ShowTaskProblem();
         SyncClockButton.Content = _t.SyncClock;
         AudioBox.Content = _t.AudioOption;
         AudioBox.ToolTip = _t.AudioTooltip;
@@ -148,6 +162,8 @@ public partial class MainWindow : Window
         RefreshButton.Content = _t.Refresh;
         GameBox.ToolTip = _t.GameTooltip;
         HotkeyBox.ToolTip = _t.HotkeyTooltip;
+        RecordTimerPanel.ToolTip = _t.RecordTimerTooltip;
+        System.Windows.Automation.AutomationProperties.SetHelpText(RecordTimerText, _t.RecordTimerTooltip);
         _trayShow.Text = _t.TrayShow;
         _trayExit.Text = _t.TrayExit;
         // Rebuild the pickers in the new language, keeping what is selected.
@@ -178,6 +194,8 @@ public partial class MainWindow : Window
     {
         base.OnSourceInitialized(e);
         _hwnd = new WindowInteropHelper(this).Handle;
+        // Recording a monitor must not show this window (its timer, the task ID) in the video; it stays visible on screen.
+        SetWindowDisplayAffinity(_hwnd, WDA_EXCLUDEFROMCAPTURE);
         HwndSource.FromHwnd(_hwnd).AddHook(WndProc);
         RegisterHotkey();
     }
@@ -371,8 +389,8 @@ public partial class MainWindow : Window
         LanguageBox.IsEnabled = PlayerBox.IsEnabled = NameBox.IsEnabled = idle;
         bool inRoom = state == RunState.Agent && _agent?.Room is not null;
         RoomBox.Visibility = inRoom ? Visibility.Visible : Visibility.Collapsed;
-        TaskLabel.Visibility = TaskBox.Visibility = inRoom && _agent!.IsHost ? Visibility.Visible : Visibility.Collapsed;
-        TaskBox.IsEnabled = inRoom && _agent?.Room is { CurrentSession: null };
+        TaskLabel.Visibility = TaskPanel.Visibility = inRoom && _agent!.IsHost ? Visibility.Visible : Visibility.Collapsed;
+        TaskPanel.IsEnabled = inRoom && _agent?.Room is { CurrentSession: null };
         JoinButton.Content = inRoom ? _t.LeaveRoom : _t.JoinRoom;
         JoinButton.IsEnabled = idle || inRoom;
         CreateButton.Content = inRoom ? _t.CloseRoom : _t.CreateRoom;
@@ -387,6 +405,7 @@ public partial class MainWindow : Window
     private void BeginCountdown()
     {
         _countdownLeft = CountdownSeconds;
+        RecordTimerText.Text = FormatRecordTime(TimeSpan.Zero);
         _overlay = new CountdownOverlay();
         _overlay.Show();
         _countdown = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
@@ -449,10 +468,15 @@ public partial class MainWindow : Window
             _runStarted = DateTime.Now;
             SetState(RunState.Recording);
             _clock.Start();
+            StartRecordTimer(_runStarted);
             ShowRecordingStatus();
         }), TaskContinuationOptions.OnlyOnRanToCompletion);
         // Shown only once the capture has ended, so the badge never ends up in the video.
-        run.CaptureStopped.ContinueWith(_ => Dispatcher.Invoke(() => ShowProcessingBadge(run)), TaskContinuationOptions.OnlyOnRanToCompletion);
+        run.CaptureStopped.ContinueWith(_ => Dispatcher.Invoke(() =>
+        {
+            StopRecordTimer();
+            ShowProcessingBadge(run);
+        }), TaskContinuationOptions.OnlyOnRanToCompletion);
         run.PhaseChanged += () => Dispatcher.BeginInvoke(() => ShowPhaseStatus(run));
         run.Completion.ContinueWith(t => Dispatcher.Invoke(() => OnRunCompleted(t.Result)),
             TaskContinuationOptions.OnlyOnRanToCompletion);
@@ -496,6 +520,7 @@ public partial class MainWindow : Window
 
     private void StopRecording()
     {
+        StopRecordTimer();
         SetState(RunState.Stopping, t => t.StoppingStatus);
         _run!.Stop();
     }
@@ -503,6 +528,7 @@ public partial class MainWindow : Window
     private void OnRunCompleted(RunResult result)
     {
         _run = null;
+        StopRecordTimer();
         foreach (string line in RoomSession.LogLines(Path.GetFileName(result.SessionDir), result)) _log.Write(line);
         SetState(RunState.Idle, t => t.Describe(result));
         var (title, body) = _t.Notification(result);
@@ -518,6 +544,42 @@ public partial class MainWindow : Window
         string dir = _run.SessionDir;
         SetStatus(t => t.RecordingStatus(elapsed, status, dir));
         _tray.Text = _t.TrayTooltip($"{elapsed:hh\\:mm\\:ss}");
+    }
+
+    /// <summary>Shows the recording time from <paramref name="from"/>; 00:00:00 until then (a room's 3-2-1).</summary>
+    private void StartRecordTimer(DateTime from)
+    {
+        _recordFrom = from;
+        ShowRecordTimer();
+        _recordTimer.Start();
+    }
+
+    /// <summary>Freezes the recording time where it is; it stays shown until the next recording.</summary>
+    private void StopRecordTimer()
+    {
+        if (_recordFrom is null) return;
+        _recordTimer.Stop();
+        ShowRecordTimer();
+        _recordFrom = null;
+        RecordTimerDot.Visibility = Visibility.Hidden;
+        RecordTimerText.Foreground = RecordTimerStopped;
+    }
+
+    private void ShowRecordTimer()
+    {
+        if (_recordFrom is not { } from) return;
+        var elapsed = DateTime.Now - from;
+        RecordTimerText.Text = FormatRecordTime(elapsed);
+        // Red with the dot once it counts; grey at 00:00:00 during a room's 3-2-1.
+        bool counting = elapsed >= TimeSpan.Zero;
+        RecordTimerDot.Visibility = counting ? Visibility.Visible : Visibility.Hidden;
+        RecordTimerText.Foreground = counting ? RecordTimerRunning : RecordTimerStopped;
+    }
+
+    private static string FormatRecordTime(TimeSpan elapsed)
+    {
+        if (elapsed < TimeSpan.Zero) elapsed = TimeSpan.Zero;
+        return $"{(int)elapsed.TotalHours:00}:{elapsed:mm\\:ss}";
     }
 
     /// <summary>What the main button and the hotkey do in a room: the host starts/ends rounds, the others say they are ready.</summary>
@@ -610,6 +672,7 @@ public partial class MainWindow : Window
                 return;
             }
             RoomBox.Text = update.Code;
+            if (_pendingTask is { } pending && update.CurrentSession == pending) TaskStarted(pending);
             SetState(_state);
             if (_run is null) ShowAgentStatus();
         });
@@ -617,7 +680,15 @@ public partial class MainWindow : Window
         {
             if (_room != room) return;
             if (agent.Room is null) Disconnect(_ => error);
-            else SetStatus(_ => error);
+            else
+            {
+                SetStatus(_ => error);
+                if (agent.IsHost)
+                {
+                    _pendingTask = null;
+                    ToastOverlay.Notify(false, error);  // e.g. the round refused: the host is in game
+                }
+            }
         });
         _room = room;
         _roundResult = null;
@@ -744,18 +815,72 @@ public partial class MainWindow : Window
         if (_run is null) ShowAgentStatus();
     }
 
+    /// <summary>Why the task ID cannot start a round, or null with <paramref name="task"/> = &lt;batch&gt;-S&lt;video&gt;.</summary>
+    private string? TaskProblem(Strings t, out string? task)
+    {
+        task = null;
+        string batch = TaskBox.Text.Trim();
+        if (batch.Length == 0) return t.TaskBatchMissing;
+        if (VideoBox.SelectedIndex < 0) return t.TaskBatchFull(batch);
+        string id = $"{batch}-S{VideoBox.SelectedIndex + 1:00}";
+        // Windows drops a trailing dot from a folder name: two task IDs would share one folder.
+        if (!Odx.Protocol.ToggleRound.IsValidSessionId(id) || batch.EndsWith('.')) return t.TaskBatchInvalid;
+        task = id;
+        return null;
+    }
+
+    private void ShowTaskProblem()
+    {
+        if (TaskProblem(_t, out _) is { } problem)
+        {
+            TaskBox.BorderBrush = RecordTimerRunning;
+            TaskPanel.ToolTip = problem;
+        }
+        else
+        {
+            TaskBox.ClearValue(BorderBrushProperty);
+            TaskPanel.ToolTip = _t.TaskIdTooltip;
+        }
+    }
+
+    /// <summary>The batch of the last round keeps its next video; any other batch starts at S01.</summary>
+    private void TaskBatch_Changed(object sender, System.Windows.Controls.TextChangedEventArgs e)
+    {
+        int next = TaskBox.Text.Trim() == _settings.TaskBatch ? _settings.TaskVideo : 1;
+        VideoBox.SelectedIndex = next is >= 1 and <= MaxVideosPerBatch ? next - 1 : -1;
+        ShowTaskProblem();
+    }
+
+    private void TaskVideo_Changed(object sender, System.Windows.Controls.SelectionChangedEventArgs e) => ShowTaskProblem();
+
+    /// <summary>The round started with the host's task ID: the batch is kept and the next round gets the next video.</summary>
+    private void TaskStarted(string started)
+    {
+        _pendingTask = null;
+        // From the started ID, not the boxes: the host may have typed in them since pressing the hotkey.
+        int cut = started.LastIndexOf("-S", StringComparison.Ordinal);
+        _settings.TaskBatch = started[..cut];
+        _settings.TaskVideo = int.Parse(started[(cut + 2)..], System.Globalization.CultureInfo.InvariantCulture) + 1;
+        _settings.Save();
+        if (TaskBox.Text.Trim() == _settings.TaskBatch)
+            VideoBox.SelectedIndex = _settings.TaskVideo <= MaxVideosPerBatch ? _settings.TaskVideo - 1 : -1;
+        ShowTaskProblem();
+    }
+
     private async void ToggleRound()
     {
         if (_room is not { } room) return;
         string? task = null;
         if (room.Agent.Room is { CurrentSession: null })
         {
-            task = TaskBox.Text.Trim();
-            if (!Odx.Protocol.ToggleRound.IsValidSessionId(task))
+            if (TaskProblem(_t, out task) is { } problem)
             {
-                SetStatus(t => t.TaskIdRequired);
+                SetStatus(t => TaskProblem(t, out _) ?? t.TaskIdRequired);
+                // The host presses the hotkey in game: a notice on the screen (excluded from capture, silent) says why.
+                ToastOverlay.Notify(false, _t.TaskNotStarted, problem);
                 return;
             }
+            _pendingTask = task;
         }
         try
         {
@@ -763,6 +888,7 @@ public partial class MainWindow : Window
         }
         catch (Exception e) when (e is System.Net.WebSockets.WebSocketException or OperationCanceledException)
         {
+            _pendingTask = null;
             string error = e.Message;
             SetStatus(t => t.RoundToggleFailed(error));
         }
@@ -772,6 +898,8 @@ public partial class MainWindow : Window
     private void ShowAgentCountdown(int countdownMs, CancellationToken cancelled)
     {
         int left = (int)Math.Ceiling(countdownMs / 1000.0);
+        // The delivered video starts at round_start, the end of the 3-2-1: the recording time counts from there too.
+        StartRecordTimer(DateTime.Now.AddMilliseconds(countdownMs));
         var overlay = new CountdownOverlay { Seconds = left };
         var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(countdownMs / (double)left) };
         bool closed = false;
@@ -787,7 +915,11 @@ public partial class MainWindow : Window
             if (--left > 0) overlay.Seconds = left;
             else End();
         };
-        cancelled.Register(() => Dispatcher.BeginInvoke(End));
+        cancelled.Register(() => Dispatcher.BeginInvoke(() =>
+        {
+            End();
+            if (_run is null) StopRecordTimer();  // the round was called off before any capture started
+        }));
         overlay.Show();
         timer.Start();
     }
@@ -802,9 +934,14 @@ public partial class MainWindow : Window
             _roundResult = null;
             _runStarted = DateTime.Now;
             _clock.Start();
+            if (_recordFrom is null) StartRecordTimer(_runStarted);  // else the 3-2-1 already set it
             ShowRecordingStatus();
         });
-        run.CaptureStopped.ContinueWith(_ => Dispatcher.Invoke(() => ShowProcessingBadge(run)), TaskContinuationOptions.OnlyOnRanToCompletion);
+        run.CaptureStopped.ContinueWith(_ => Dispatcher.Invoke(() =>
+        {
+            StopRecordTimer();
+            ShowProcessingBadge(run);
+        }), TaskContinuationOptions.OnlyOnRanToCompletion);
         run.PhaseChanged += () => Dispatcher.BeginInvoke(() => ShowPhaseStatus(run));
         run.Completion.ContinueWith(t => Dispatcher.Invoke(() => OnAgentRunCompleted(t.Result)),
             TaskContinuationOptions.OnlyOnRanToCompletion);
@@ -815,6 +952,7 @@ public partial class MainWindow : Window
     {
         _run = null;
         _clock.Stop();
+        StopRecordTimer();
         // The notice comes once the capture is built (RoundKept).
         if (_state == RunState.Stopping) SetState(RunState.Idle, t => t.LeftRoom);
         else ShowAgentStatus();
@@ -903,4 +1041,7 @@ public partial class MainWindow : Window
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint dwAffinity);
 }

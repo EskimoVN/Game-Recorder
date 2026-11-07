@@ -1,0 +1,63 @@
+name: Build Eskimo capture package
+
+# Builds the players' package for Eskimo from the released upstream package: the launcher, odx-capture.json (server,
+# access key, delivery names), ffmpeg and games\ are taken from it, odx-app.exe and odx.exe are built from this branch
+# (capture/dotnet/build-package.ps1). Publishes a GitHub release eskimo-capture-v<version> with the full package and
+# the update (the two executables only). The tag does not match capture-v*, so release-capture.yml does not run.
+on:
+  push:
+    branches: [eskimo-0.2.9]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Package version
+        default: '0.2.9'
+      base:
+        description: Upstream release used as the base package
+        default: capture-v0.2.8
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: windows-latest
+    env:
+      VERSION: ${{ inputs.version || '0.2.9' }}
+      BASE_TAG: ${{ inputs.base || 'capture-v0.2.8' }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: capture/dotnet/global.json
+
+      - name: Download the base package
+        shell: pwsh
+        run: gh release download $env:BASE_TAG -R trquoccuong/Game-Recorder -p 'odx-capture-*-win-x64.zip' -D base
+
+      - name: Build the package
+        shell: pwsh
+        run: |
+          $base = (Get-ChildItem base -Filter '*.zip' | Select-Object -First 1).FullName
+          ./capture/dotnet/build-package.ps1 -Base $base -Version $env:VERSION
+
+      - name: Publish the release
+        shell: pwsh
+        run: |
+          $tag = "eskimo-capture-v$env:VERSION"
+          $dist = 'capture/dotnet/dist'
+          $notes = @"
+          Odx Capture $env:VERSION (Eskimo), built from $env:BASE_TAG with the patch on branch ${{ github.ref_name }} ($env:GITHUB_SHA).
+
+          - odx-capture-$env:VERSION-win-x64.zip: full package, same layout as the official one. Unzip and run "Odx Capture.exe" as administrator.
+          - odx-capture-$env:VERSION-update.zip: for a machine with the official package: unzip into its folder and replace (bin\odx-app.exe, bin\odx.exe only).
+
+          The game launcher stays OdxReforger.exe from the official releases.
+          "@
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -eq 0) { gh release delete $tag --yes --cleanup-tag }
+          gh release create $tag "$dist/odx-capture-$env:VERSION-win-x64.zip" "$dist/odx-capture-$env:VERSION-update.zip" `
+            --target $env:GITHUB_SHA --title "Odx Capture $env:VERSION (Eskimo)" --notes $notes
+          if ($LASTEXITCODE -ne 0) { throw 'gh release create failed' }
