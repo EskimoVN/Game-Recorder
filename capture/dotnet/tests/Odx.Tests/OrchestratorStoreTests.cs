@@ -56,6 +56,21 @@ public sealed class OrchestratorStoreTests
         Assert.Equal(new Dictionary<string, double> { ["p1"] = 1.0, ["p2"] = 0.5 }, hours);
     }
 
+    [Fact]
+    public void A_closed_rooms_code_drawn_again_is_an_open_room_with_the_new_host()
+    {
+        string path = Path.Combine(Cs2Fixtures.TempDir(), "orchestrator.db");
+        using var store = new OrchestratorStore(path);
+        store.SaveRoom(new StoredRoom("ABC234", "p1", null, "lan1", "m1", null, "Synthetic", 3, []));
+        store.CloseRoom("ABC234");
+        Assert.Empty(store.OpenRooms());
+
+        store.SaveRoom(new StoredRoom("ABC234", "p2", null, null, null, null, "Synthetic", 0, []));
+
+        var room = Assert.Single(store.OpenRooms());
+        Assert.Equal(("ABC234", "p2", null, null, 0), (room.Code, room.Host, room.LanNetworkId, room.MatchId, room.RoundNumber));
+    }
+
     private static StoredRound Round(string sid, string state, double start, double? end, params RoundPlayer[] players) =>
         new(sid, "ABC234", state, false, null, false, new RoundRecord(sid, "m1", "Counter-Strike 2", "de_dust2", 1, start, end, 12300,
             [.. players]), [new JsonObject { ["type"] = "kill" }]);

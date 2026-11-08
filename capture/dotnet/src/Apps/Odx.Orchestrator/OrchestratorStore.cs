@@ -51,11 +51,13 @@ public sealed class OrchestratorStore : IDisposable
         set => Execute("INSERT INTO meta VALUES ('event_id', $v) ON CONFLICT(key) DO UPDATE SET value = $v", ("$v", value.ToString()));
     }
 
+    /// <summary>A new room drawing the code of a closed one (codes are random, only open rooms are checked) reopens its row.</summary>
     public void SaveRoom(StoredRoom room) =>
         Execute("""
             INSERT INTO rooms VALUES ($code, $host, $server, $lan, $match, $map, $game, $round, $between, $now, NULL)
-            ON CONFLICT(code) DO UPDATE SET match_id = $match, map = $map, game = $game, round_number = $round,
-                between_rounds = $between
+            ON CONFLICT(code) DO UPDATE SET host = $host, server = $server, lan_network = $lan, match_id = $match, map = $map,
+                game = $game, round_number = $round, between_rounds = $between,
+                opened_utc = CASE WHEN closed_utc IS NULL THEN opened_utc ELSE $now END, closed_utc = NULL
             """,
             ("$code", room.Code), ("$host", room.Host), ("$server", room.Server), ("$lan", room.LanNetworkId),
             ("$match", room.MatchId), ("$map", room.Map), ("$game", room.Game), ("$round", room.RoundNumber),
