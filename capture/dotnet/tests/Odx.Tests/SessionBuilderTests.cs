@@ -12,7 +12,7 @@ public class SessionBuilderTests
     private static InputEvent Ev(double t, InputKind kind, string value = "", double dx = 0) => new(t, kind, value, dx, 0);
 
     [Fact]
-    public void Bound_inputs_get_actions_and_unbound_keys_are_dropped()
+    public void Bound_inputs_get_actions_and_unbound_keys_and_buttons_are_dropped()
     {
         var (events, unbound) = SessionBuilder.MapInputs(
         [
@@ -22,10 +22,22 @@ public class SessionBuilderTests
         Assert.Equal(new[]
         {
             (InputKind.KeyDown, "W"), (InputKind.ActionStart, "Forward"), (InputKind.ButtonDown, "Left"),
-            (InputKind.ActionStart, "Shoot"), (InputKind.ButtonDown, "Right"), (InputKind.KeyUp, "W"),
-            (InputKind.ActionEnd, "Forward"),
+            (InputKind.ActionStart, "Shoot"), (InputKind.KeyUp, "W"), (InputKind.ActionEnd, "Forward"),
         }, events.Select(e => (e.Kind, e.Value)));
-        Assert.Equal(new Dictionary<string, int> { ["Ctrl"] = 1 }, unbound);
+        Assert.Equal(new Dictionary<string, int> { ["Ctrl"] = 1, ["Right"] = 1 }, unbound);
+    }
+
+    // A side button held for a voice chat's push-to-talk is no game input: delivered, it fails the client's input check.
+    [Fact]
+    public void Unbound_side_button_is_left_out_and_counted_once_per_press()
+    {
+        var (events, unbound) = SessionBuilder.MapInputs(
+        [
+            Ev(10, InputKind.ButtonDown, "X1"), Ev(15, InputKind.ButtonDown, "X1"), Ev(20, InputKind.KeyDown, "W"),
+            Ev(30, InputKind.ButtonUp, "X1"), Ev(40, InputKind.KeyUp, "W"), Ev(50, InputKind.ButtonDown, "X1"), Ev(60, InputKind.ButtonUp, "X1"),
+        ], Bindings, 0);
+        Assert.DoesNotContain(events, e => e.Value == "X1");
+        Assert.Equal(new Dictionary<string, int> { ["X1"] = 2 }, unbound);
     }
 
     [Fact]

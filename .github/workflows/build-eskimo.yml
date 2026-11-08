@@ -44,6 +44,15 @@ jobs:
         with:
           global-json-file: capture/dotnet/global.json
 
+      # The input mapping and the session checks the delivered files depend on (no ffmpeg needed: video rules skip).
+      - name: Unit tests
+        shell: pwsh
+        run: |
+          $filter = 'FullyQualifiedName~SessionBuilderTests|FullyQualifiedName~ValidatorTests.Each_violation_is_caught|' +
+                    'FullyQualifiedName~ValidatorTests.Every_error_rule_has_a_mutator|FullyQualifiedName~ValidatorTests.Valid_session_has_no_issues'
+          dotnet test capture/dotnet/tests/Odx.Tests --filter $filter
+          if ($LASTEXITCODE -ne 0) { throw 'unit tests failed' }
+
       - name: Download the base package
         shell: pwsh
         run: gh release download $env:BASE_TAG -R trquoccuong/Game-Recorder -p 'odx-capture-*-win-x64.zip' -D base

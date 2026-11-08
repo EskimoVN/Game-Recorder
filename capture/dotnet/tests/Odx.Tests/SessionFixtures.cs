@@ -160,6 +160,7 @@ public static class SessionFixtures
         ["c2w.orthonormal"] = d => EditRows(d, rows => rows[0]["C2W_M00"] = Repr(Num(rows[0]["C2W_M00"]) * 1.5)),
         ["input.mouse_delta"] = d => EditRows(d, rows => rows[3]["input_mouse_dx"] = Frames.Null),
         ["input.keys_without_actions"] = d => EditRows(d, rows => rows[KeyFrame(rows)]["input_actions"] = Frames.Null),
+        ["input.buttons_without_actions"] = d => EditRows(d, rows => rows[NoInputFrame(rows)]["input_mouse_buttons"] = "X1"),
         ["input.no_input_null"] = d => EditRows(d, rows => rows[NoInputFrame(rows)]["input_actions"] = "Jump"),
         ["input.delimiter"] = d => EditRows(d, rows => rows[KeyFrame(rows)]["input_keys"] = "W,Shift"),
         ["video.missing"] = d => File.Delete(Path.Combine(d, "video.mp4")),
