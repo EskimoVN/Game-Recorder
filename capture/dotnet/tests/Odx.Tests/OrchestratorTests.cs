@@ -672,13 +672,17 @@ public sealed class OrchestratorTests : IAsyncLifetime
         await host.ToggleRoundAsync(0, default);
         Assert.Equal("task-42", Path.GetFileName(await kept.Task.WaitAsync(TimeSpan.FromSeconds(10))));
 
-        refused = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        kept = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         for (int i = 0; i < 100 && host.Room!.Members.Any(m => m.State != "idle"); i++) await Task.Delay(50);
         await member.SetReadyAsync(true, default);
         for (int i = 0; i < 100 && !host.Room!.Members.All(m => m.PlayerId == "p1" || m.Ready); i++) await Task.Delay(50);
         await host.ToggleRoundAsync(0, default, "task-42");
-        Assert.Contains("already used", await refused.Task.WaitAsync(TimeSpan.FromSeconds(5)));
-        Assert.Null((await RoomStatus(code))["current_session"]);
+        for (int i = 0; i < 100 && (string?)(await RoomStatus(code))["current_session"] != "task-42"; i++) await Task.Delay(50);
+        Assert.Equal("task-42", (string?)(await RoomStatus(code))["current_session"]);
+        await host.ToggleRoundAsync(0, default);
+        string again = await kept.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal("task-42", Path.GetFileName(again));
+        Assert.Single(Directory.GetDirectories(Path.GetDirectoryName(again)!, "task-42.replaced-*"));
     }
 
     [Fact]

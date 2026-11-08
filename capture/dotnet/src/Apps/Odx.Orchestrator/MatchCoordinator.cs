@@ -99,8 +99,8 @@ public sealed partial class MatchCoordinator(OrchestratorOptions options, int ti
             case ToggleRound { SessionId: { } sid } when room is not null && room.IsHost(link) && room.Current is null && !ToggleRound.IsValidSessionId(sid):
                 effects.Sends.Add((link, new RoomError($"task id '{sid}': letters, digits, _ . - only, 64 at most")));
                 break;
-            case ToggleRound { SessionId: { } sid } when room is not null && room.IsHost(link) && room.Current is null && SessionIdUsed(sid):
-                effects.Sends.Add((link, new RoomError($"task id '{sid}' was already used")));
+            case ToggleRound { SessionId: { } sid } when room is not null && room.IsHost(link) && room.Current is null && SessionIdBusy(sid):
+                effects.Sends.Add((link, new RoomError($"task id '{sid}' is still being recorded or saved; wait or use another")));
                 break;
             case ToggleRound t when room is not null && room.IsHost(link):
                 Apply(room, room.Current is null

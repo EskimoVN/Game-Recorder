@@ -175,6 +175,19 @@ public sealed class GameServerAgent(GameServerAgentOptions options, IGameServerR
     private async Task StartAsync(string sessionId)
     {
         string dir = Path.Combine(options.WorkDir, sessionId);
+        if (Directory.Exists(dir))
+        {
+            string aside = $"{dir}.replaced-{DateTime.Now:yyyyMMdd-HHmmss}";
+            try
+            {
+                Directory.Move(dir, aside);
+                log.LogInformation("{Session}: the earlier take moved to {Aside}", sessionId, aside);
+            }
+            catch (IOException e)
+            {
+                log.LogWarning("{Session}: cannot move {Dir} aside: {Error}", sessionId, dir, e.Message);
+            }
+        }
         Directory.CreateDirectory(Path.Combine(dir, "server"));
         // Sampling first: starting SourceTV waits up to 3 s for its demo, and a short round may end meanwhile.
         var stopSampling = new CancellationTokenSource();

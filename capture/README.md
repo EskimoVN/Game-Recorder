@@ -152,7 +152,7 @@ Each participant keeps its own part of a round; for now the tester copies them b
 - **LAN (ZeroTier)** (`AgentOptions.Lan` when creating a room; no longer offered in the window, the games tested play over the internet) gives the room its own virtual LAN for games that only play over LAN (e.g. Warcraft III Classic/1.29): everyone in the room is on one layer-2 network, so LAN game lists and broadcasts work. The orchestrator creates a ZeroTier network per room on its controller (`--zerotier-api`, token from `--zerotier-token-file` or `ODX_ZT_TOKEN`), authorizes each member's ZeroTier node while they are in the room and deletes the network when the room closes; odx-app joins and leaves it through the local ZeroTier service (the per-user token copy that ZeroTier's tray app keeps, so no admin rights) and shows its LAN IP. Without ZeroTier, odx-app offers to install it (winget, one UAC prompt).
 - **Join room** asks for the invite code in a dialog; **Leave room** to go. Leaving during a countdown cancels the round; leaving during a round stops your recording.
 - In a room, the main button and the hotkey are the room action:
-  - the host types the round's **task ID** (its session id: the folder every player's capture and the delivered session get; letters, digits, `_ . -`, each used once) and starts and ends rounds (3 s countdown);
+  - the host types the round's **task ID** (its session id: the folder every player's capture and the delivered session get; letters, digits, `_ . -`; typed again, it is a new take of that round and every machine moves its earlier folder to `<id>.replaced-<time>`) and starts and ends rounds (3 s countdown);
   - the other players say they are ready (again to take it back); the host can start only once all of them are, and once nobody (the host included) is still saving the last round (the button waits, the orchestrator checks too). 
 
   The status line lists the members (✓ = ready). The game profile and FPS come from the orchestrator.
@@ -250,7 +250,7 @@ The server stores no recordings: the rounds stay with the players and the game s
   Arma 3 also has `GUNNER` (looking through optics or a vehicle sight) and `GROUP` (commander) views: map `GUNNER` to
   first person, block or flag `GROUP`?
 - **Multiplayer (provisional):**
-  - One round = one session, named by the host (the task ID typed before the round; letters, digits, `_ . -`; used once) or, in a room driven by a game server plugin, `<match>-rNN`.
+  - One round = one session, named by the host (the task ID typed before the round; letters, digits, `_ . -`; a name typed again replaces the earlier round of that name, kept aside as `<name>.replaced-<time>`) or, in a room driven by a game server plugin, `<match>-rNN`.
   - Ping is the median NTP RTT to the orchestrator.
   - **`key_bindings.json` stays in the delivered player folder** (SOW §2 asks for key bindings) although spec v2.1 dropped the file in favour of `input_keys` / `input_actions` in `frames.csv` (which are there too): confirm whether to keep it.
   - **Pre-roll cut by re-encoding:** the delivered video is re-encoded (x264 crf 18) to start exactly at `round_start`; the original countdown recording stays in `_work/`. Confirm that a second encoding generation is acceptable, or that frame 0 may instead stay at the countdown with `round_start_frame` pointing at play.

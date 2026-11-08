@@ -542,6 +542,8 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
         CancellationToken stopped;
         lock (_gate) stopped = _stopBeforeStart!.Token;
         if (s.CountdownMs > 0) Countdown?.Invoke(s.CountdownMs, stopped);
+        if (MoveAside(Path.Combine(options.OutputRoot, s.SessionId), "replaced") is { } earlier)
+            Log?.Invoke($"{s.SessionId}: the earlier take moved to {earlier}");
         string? etl = await StartPacketsAsync(s.SessionId, stop);
         ICaptureRun run;
         try
@@ -592,15 +594,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
                 _run = null;
                 _runSessionId = null;
             }
-            string aside = $"{result.SessionDir}.cancelled-{DateTime.Now:yyyyMMdd-HHmmss}";
-            try
-            {
-                Directory.Move(result.SessionDir, aside);
-            }
-            catch (IOException e)
-            {
-                Log?.Invoke($"cannot move the cancelled recording aside: {e.Message}");
-            }
+            string aside = MoveAside(result.SessionDir, "cancelled") ?? result.SessionDir;
             await EndWithoutCaptureAsync(s.SessionId, $"round cancelled, recording kept locally only ({aside})", stop, cancelled: true);
             return;
         }
@@ -719,6 +713,23 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
         finally
         {
             _sendLock.Release();
+        }
+    }
+
+    /// <summary>Renames <paramref name="dir"/> to <c>&lt;dir&gt;.&lt;why&gt;-&lt;now&gt;</c>; null when it does not exist or cannot be moved.</summary>
+    private string? MoveAside(string dir, string why)
+    {
+        if (!Directory.Exists(dir)) return null;
+        string aside = $"{dir}.{why}-{DateTime.Now:yyyyMMdd-HHmmss}";
+        try
+        {
+            Directory.Move(dir, aside);
+            return aside;
+        }
+        catch (IOException e)
+        {
+            Log?.Invoke($"cannot move {dir} aside: {e.Message}");
+            return null;
         }
     }
 }
