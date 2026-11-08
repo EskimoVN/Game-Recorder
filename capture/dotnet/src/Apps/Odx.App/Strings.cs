@@ -117,7 +117,8 @@ public sealed class Strings
     public required string TaskBatchInvalid { get; init; }
     public required Func<string, string> TaskBatchFull { get; init; }
     public required string TaskNotStarted { get; init; }
-    public required Func<string, string, string> TaskRetake { get; init; }
+    public required Func<string, string> TaskExists { get; init; }
+    public required Func<string, string> TaskUsedOnServer { get; init; }
     public required Func<string, string> EndRound { get; init; }
     public required Func<string, string> ReadyButton { get; init; }
     public required Func<string, string> UnreadyButton { get; init; }
@@ -262,7 +263,8 @@ public sealed class Strings
         TaskBatchInvalid = "Batch code: letters, digits, _ . - only, starting with a letter or digit, not ending with a dot",
         TaskBatchFull = batch => $"Batch {batch} has its 15 videos: type the next batch code",
         TaskNotStarted = "Round not started",
-        TaskRetake = (task, retake) => $"{task} was already used on the server: recording as {retake}. Its folder takes the name {task} on each PC where no folder has it.",
+        TaskExists = task => $"{task} is already in data\\captures: delete that video or pick another video number",
+        TaskUsedOnServer = task => $"{task} was already used on the server, even if its video is deleted on this PC: pick an unused video number or ask the company to remove this ID",
         TaskIdRequired = "Enter the task ID (the round's folder name: letters, digits, _ . -) before starting the round",
         EndRound = hotkey => $"End round ({hotkey})",
         ReadyButton = hotkey => $"I'm ready ({hotkey})",
@@ -289,7 +291,7 @@ public sealed class Strings
         BuildFailed = error => $"Could not build the session: {error}",
         ValidationPass = (errors, warnings) => $"Validation PASS: {errors} errors, {warnings} warnings",
         ValidationFail = (errors, warnings) => $"Validation FAIL: {errors} errors, {warnings} warnings",
-        UnboundKeys = keys => $"Keys not bound in the game profile (left out): {keys}",
+        UnboundKeys = keys => $"Keys and mouse buttons not bound in the game profile (left out): {keys}",
         ClockNtp = (server, rtt, offset) =>
             $"Clock: NTP {server}, RTT {rtt:F0} ms; Windows clock off by {offset / 1000:+0.000;-0.000} s",
         ClockSystem = "Clock: Windows clock only (NTP not measured — check time_server in odx-capture.json)",
@@ -421,7 +423,8 @@ public sealed class Strings
         TaskBatchInvalid = "Mã lô chỉ gồm chữ, số, _ . -, bắt đầu bằng chữ hoặc số, không kết thúc bằng dấu chấm",
         TaskBatchFull = batch => $"Lô {batch} đã đủ 15 video: nhập mã lô tiếp theo",
         TaskNotStarted = "Round chưa bắt đầu",
-        TaskRetake = (task, retake) => $"{task} đã dùng trên server: quay với tên {retake}. Máy nào chưa có thư mục {task} thì thư mục sẽ tự đổi về {task}.",
+        TaskExists = task => $"Đã có video {task} trong data\\captures: xoá video đó hoặc chọn số video khác",
+        TaskUsedOnServer = task => $"{task} đã dùng trên server, kể cả khi đã xoá video trên máy: chọn số video chưa dùng hoặc nhờ công ty xoá mã này",
         TaskIdRequired = "Nhập Task ID (tên thư mục của round: chữ, số, _ . -) rồi mới bắt đầu round",
         EndRound = hotkey => $"Kết thúc round ({hotkey})",
         ReadyButton = hotkey => $"Tôi sẵn sàng ({hotkey})",
@@ -448,7 +451,7 @@ public sealed class Strings
         BuildFailed = error => $"Không tạo được session: {error}",
         ValidationPass = (errors, warnings) => $"Kiểm tra ĐẠT: {errors} lỗi, {warnings} cảnh báo",
         ValidationFail = (errors, warnings) => $"Kiểm tra KHÔNG ĐẠT: {errors} lỗi, {warnings} cảnh báo",
-        UnboundKeys = keys => $"Phím chưa gán trong hồ sơ game (đã bỏ qua): {keys}",
+        UnboundKeys = keys => $"Phím/nút chuột chưa gán trong hồ sơ game (đã bỏ qua): {keys}",
         ClockNtp = (server, rtt, offset) =>
             $"Đồng hồ: NTP {server}, RTT {rtt:F0} ms; đồng hồ Windows lệch {offset / 1000:+0.000;-0.000} giây",
         ClockSystem = "Đồng hồ: chỉ dùng đồng hồ Windows (chưa đo được NTP — kiểm tra time_server trong odx-capture.json)",

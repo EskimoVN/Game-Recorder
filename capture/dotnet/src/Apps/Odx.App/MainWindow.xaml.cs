@@ -38,10 +38,6 @@ public partial class MainWindow : Window
     private const uint MOD_NOREPEAT = 0x4000;
     private const int CountdownSeconds = 3;
     private const int MaxVideosPerBatch = 15;
-    /// <summary>A task ID the orchestrator already has (e.g. a bad take whose folder was deleted) is recorded as
-    /// &lt;id&gt;-retake2, -retake3, …; each PC renames the folder back to &lt;id&gt; when that name is free there.</summary>
-    private const string RetakeSuffix = "-retake";
-    private const int MaxRetake = 9;
     private const uint WDA_NONE = 0, WDA_EXCLUDEFROMCAPTURE = 0x11;  // Windows 10 2004+
     private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
 
@@ -694,27 +690,19 @@ public partial class MainWindow : Window
             SetState(_state);
             if (_run is null) ShowAgentStatus();
         });
-        // Only once the round's files are in the folder (round_record), so a retake's folder can take its task's name.
-        agent.RoundFilesKept += (_, dir) => Dispatcher.BeginInvoke(() => RenameRetakeFolder(dir));
         agent.RoomError += error => Dispatcher.BeginInvoke(() =>
         {
             if (_room != room) return;
             if (agent.Room is null) Disconnect(_ => error);
             else
             {
-                SetStatus(_ => error);
-                if (agent.IsHost && _pendingTask is { } pending && error == $"task id '{pending}' was already used" &&
-                    NextRetake(pending) is { } retake)
-                {
-                    // The orchestrator keeps every task ID it has seen: the round starts again under a retake name.
-                    _pendingTask = retake;
-                    ToastOverlay.Notify(true, _t.TaskRetake(BaseTask(pending), retake));
-                    SendToggleRound(room, retake);
-                }
-                else if (agent.IsHost)
+                // The orchestrator keeps every task ID it has seen, a cancelled round's or a deleted video's too.
+                string? used = _pendingTask is { } pending && error == $"task id '{pending}' was already used" ? pending : null;
+                SetStatus(t => used is null ? error : t.TaskUsedOnServer(used));
+                if (agent.IsHost)
                 {
                     _pendingTask = null;
-                    ToastOverlay.Notify(false, error);  // e.g. the round refused: the host is in game
+                    ToastOverlay.Notify(false, used is null ? error : _t.TaskUsedOnServer(used));  // e.g. the host is in game
                 }
             }
         });
@@ -853,6 +841,8 @@ public partial class MainWindow : Window
         string id = $"{batch}-S{VideoBox.SelectedIndex + 1:00}";
         // Windows drops a trailing dot from a folder name: two task IDs would share one folder.
         if (!Odx.Protocol.ToggleRound.IsValidSessionId(id) || batch.EndsWith('.')) return t.TaskBatchInvalid;
+        // The round would record into that video's folder: the leader deletes it or picks another number.
+        if (Directory.Exists(Path.Combine(PackageFolders.Captures, id))) return t.TaskExists(id);
         task = id;
         return null;
     }
@@ -886,7 +876,6 @@ public partial class MainWindow : Window
     {
         _pendingTask = null;
         // From the started ID, not the boxes: the host may have typed in them since pressing the hotkey.
-        started = BaseTask(started);
         int cut = started.LastIndexOf("-S", StringComparison.Ordinal);
         _settings.TaskBatch = started[..cut];
         _settings.TaskVideo = int.Parse(started[(cut + 2)..], System.Globalization.CultureInfo.InvariantCulture) + 1;
@@ -925,43 +914,6 @@ public partial class MainWindow : Window
             _pendingTask = null;
             string error = e.Message;
             SetStatus(t => t.RoundToggleFailed(error));
-        }
-    }
-
-    /// <summary>The task ID without its retake suffix: AMRF-001-S01-retake2 → AMRF-001-S01.</summary>
-    private static string BaseTask(string task)
-    {
-        int cut = task.LastIndexOf(RetakeSuffix, StringComparison.Ordinal);
-        return cut > 0 && int.TryParse(task[(cut + RetakeSuffix.Length)..], System.Globalization.NumberStyles.None,
-            System.Globalization.CultureInfo.InvariantCulture, out _) ? task[..cut] : task;
-    }
-
-    /// <summary>The next retake name for <paramref name="task"/>, or null past <see cref="MaxRetake"/>.</summary>
-    private static string? NextRetake(string task)
-    {
-        string baseTask = BaseTask(task);
-        int n = task == baseTask ? 2 : int.Parse(task[(baseTask.Length + RetakeSuffix.Length)..], System.Globalization.CultureInfo.InvariantCulture) + 1;
-        string retake = $"{baseTask}{RetakeSuffix}{n}";
-        return n <= MaxRetake && Odx.Protocol.ToggleRound.IsValidSessionId(retake) ? retake : null;
-    }
-
-    /// <summary>A retake's folder takes the task's own name when no folder has it on this PC (the bad take deleted).</summary>
-    private string RenameRetakeFolder(string dir)
-    {
-        string name = Path.GetFileName(dir), baseName = BaseTask(name);
-        if (baseName == name) return dir;
-        string target = Path.Combine(Path.GetDirectoryName(dir)!, baseName);
-        if (Directory.Exists(target)) return dir;
-        try
-        {
-            Directory.Move(dir, target);
-            _log.Write($"{name}: folder renamed to {baseName}");
-            return target;
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-        {
-            _log.Write($"{name}: folder not renamed to {baseName}: {e.Message}");
-            return dir;
         }
     }
 

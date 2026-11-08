@@ -95,8 +95,6 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
     /// for the notice every machine shows (document/video-alignment-plan.md §3.4).
     /// </summary>
     public event Action<RoundRecord>? RoundFinished;
-    /// <summary>The round's files (round.json, events, manifest) are written into its folder: nothing writes there after.</summary>
-    public event Action<string, string>? RoundFilesKept;
 
     /// <summary>Whether this player is ready for the next round; the orchestrator clears it when play starts.</summary>
     public bool IsReady { get; private set; }
@@ -692,7 +690,6 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
             long last = PlayerTimeline.WriteRoundEvents(kept, RoundRecord.Load(raw), _eventReceipts);
             foreach (long id in _eventReceipts.Keys.Where(id => id <= last)) _eventReceipts.TryRemove(id, out _);
             Manifest.Write(kept);
-            RoundFilesKept?.Invoke(files.SessionId, kept);
         }
         catch (Exception e) when (e is IOException or JsonException or FormatException or InvalidDataException)
         {

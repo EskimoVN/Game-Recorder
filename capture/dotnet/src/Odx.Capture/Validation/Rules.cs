@@ -123,6 +123,10 @@ internal static class Rules
         Err("input.keys_without_actions", "v2 §1.5.5", Needs.FrameRows, d =>
             PerFrame(d, i => d.Rows[i]["input_keys"] != Frames.Null && d.Rows[i]["input_actions"] == Frames.Null,
                 "active input_keys need non-null input_actions")),
+        // The client's input check fails a mouse button with no action too (a voice chat's push-to-talk on X1).
+        Err("input.buttons_without_actions", "v2 §1.5.5", Needs.FrameRows, d =>
+            PerFrame(d, i => d.Rows[i]["input_mouse_buttons"] != Frames.Null && d.Rows[i]["input_actions"] == Frames.Null,
+                "active input_mouse_buttons need non-null input_actions")),
         Err("input.no_input_null", "v2 §1.5.5", Needs.FrameRows, d =>
             PerFrame(d, i => d.Rows[i]["input_keys"] == Frames.Null && d.Rows[i]["input_mouse_buttons"] == Frames.Null &&
                             Delta(d, i, "input_mouse_dx") == 0 && Delta(d, i, "input_mouse_dy") == 0 &&

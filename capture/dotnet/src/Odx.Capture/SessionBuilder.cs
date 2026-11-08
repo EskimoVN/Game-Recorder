@@ -5,8 +5,9 @@ using Odx.Core;
 
 namespace Odx.Capture;
 
-/// <param name="UnboundKeys">Keys pressed but not in the profile's bindings, with press counts. Spec v2 §1.5 requires
-/// every active key to map to an action, so they are left out of input_keys.</param>
+/// <param name="UnboundKeys">Keys and mouse buttons pressed but not in the profile's bindings, with press counts. Spec v2 §1.5
+/// requires every active key to map to an action, so they are left out of input_keys / input_mouse_buttons (a side button
+/// held for a voice chat's push-to-talk fails the client's input check otherwise).</param>
 /// <param name="CameraFrames">Frames with camera columns; 0 for an action-only capture (no camera samples).</param>
 /// <param name="GridOriginOffsetMs">Frame 0 against round_start on the orchestrator's clock (session.json vendor_grid_origin_offset_ms); null outside a room.</param>
 public sealed record BuildReport(string SessionId, int FrameCount, double DurationMs, IReadOnlyDictionary<string, int> UnboundKeys,
@@ -144,8 +145,8 @@ public static class SessionBuilder
     }
 
     /// <summary>
-    /// Keeps bound keys and all mouse buttons, adds ActionStart/ActionEnd for bound inputs (an action stays active while
-    /// any of its inputs is held), drops typematic key repeats and mouse motion from before the first frame's interval.
+    /// Keeps bound keys and mouse buttons, adds ActionStart/ActionEnd for them (an action stays active while any of its
+    /// inputs is held), drops typematic key repeats and mouse motion from before the first frame's interval.
     /// </summary>
     public static (List<InputEvent> Events, SortedDictionary<string, int> UnboundKeys) MapInputs(
         IEnumerable<InputEvent> events, IReadOnlyDictionary<string, string> bindings, double firstFrameStartMs)
@@ -169,15 +170,14 @@ public static class SessionBuilder
                     continue;
             }
             bool bound = bindings.TryGetValue(e.Value, out var action);
-            if (isKey && !bound)
+            if (!bound)
             {
-                if (press && down.Add((true, e.Value))) unbound[e.Value] = unbound.GetValueOrDefault(e.Value) + 1;
-                if (!press) down.Remove((true, e.Value));
+                if (press && down.Add((isKey, e.Value))) unbound[e.Value] = unbound.GetValueOrDefault(e.Value) + 1;
+                if (!press) down.Remove((isKey, e.Value));
                 continue;
             }
             if (press ? !down.Add((isKey, e.Value)) : !down.Remove((isKey, e.Value))) continue;
             result.Add(e);
-            if (!bound) continue;
             int holders = actionHolders.GetValueOrDefault(action!) + (press ? 1 : -1);
             actionHolders[action!] = holders;
             if (press && holders == 1) result.Add(new InputEvent(e.TQpcMs, InputKind.ActionStart, action!));
