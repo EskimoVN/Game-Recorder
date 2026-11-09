@@ -341,7 +341,8 @@ public sealed class CaptureRun : ICaptureRun
         }
         var report = new CaptureReport(finalize?.Frames ?? status?.Frames ?? 0, roundFrames, _fps, status?.Duplicates ?? 0,
             status?.Starved ?? 0, status?.LeadingBlack ?? 0, File.Exists(Path.Combine(SessionDir, VideoFinalize.Output)),
-            status?.Audio?.Source, _gridOrigin, build?.Report?.GridOriginOffsetMs, failure, status?.Audio?.Error);
+            status?.Audio?.Source, _gridOrigin, build?.Report?.GridOriginOffsetMs, failure, status?.Audio?.Error,
+            status?.Stop?.Note, status?.Stop?.TailFrames ?? 0);
         var result = new RunResult(SessionDir, captureOk, status, inputEvents, errors, build, failure, finalize, report);
         SetPhase(CapturePhase.Done, 100);
         return result;

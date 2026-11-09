@@ -33,9 +33,11 @@ public class RecorderStatusTests
     {
         var status = new RecorderStatus(RecorderStatus.Stopped, 100, Stop: new StopTiming(120, 35, 30_000, FfmpegKilled: true));
         string json = status.ToJson();
-        Assert.Contains("\"stop\":{\"drain_ms\":120,\"audio_ms\":35,\"ffmpeg_ms\":30000,\"ffmpeg_killed\":true}", json);
+        Assert.Contains("\"stop\":{\"drain_ms\":120,\"audio_ms\":35,\"ffmpeg_ms\":30000,\"ffmpeg_killed\":true,\"tail_frames\":0}", json);
         Assert.Equal(status, RecorderStatus.TryParse(json));
         Assert.Null(RecorderStatus.TryParse(new RecorderStatus(RecorderStatus.Progress).ToJson())!.Stop);
+        var givenUp = new StopTiming(5, 35, 400, false, "the GPU did not hand over the last frame within 2 s", 1);
+        Assert.Equal(givenUp, RecorderStatus.TryParse(new RecorderStatus(RecorderStatus.Stopped, Stop: givenUp).ToJson())!.Stop);
     }
 
     [Theory]

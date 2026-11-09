@@ -52,7 +52,10 @@ public sealed record RecorderStatus(string Event, long Frames = 0, long Duplicat
 /// <param name="FfmpegMs">ffmpeg finishing the file once its input ended.</param>
 /// <param name="FfmpegKilled">ffmpeg did not exit within its limit and was killed: the fragmented video keeps what was
 /// written up to the last fragment.</param>
-public sealed record StopTiming(long DrainMs, long AudioMs, long FfmpegMs, bool FfmpegKilled)
+/// <param name="Note">The last captured frame was given up (the capture callback or the GPU did not answer within the
+/// stop's limit), and why; null when the stop got it.</param>
+/// <param name="TailFrames">With <paramref name="Note"/>: frames at the end that show the frame before instead.</param>
+public sealed record StopTiming(long DrainMs, long AudioMs, long FfmpegMs, bool FfmpegKilled, string? Note = null, long TailFrames = 0)
 {
     public JsonNode ToNode() => JsonSerializer.SerializeToNode(this, RecorderStatus.Options)!;
 }

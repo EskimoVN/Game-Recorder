@@ -46,6 +46,11 @@ public static class RecordCommand
     // A capture callback blocked here holds up WGC's 2-frame pool: short, so a slow encoder costs frames, not the capture
     // of what follows (Bảo's round of 2026-11-07 spent most of its 49 s in this wait).
     private static readonly TimeSpan RentWait = TimeSpan.FromMilliseconds(20);
+    /// <summary>
+    /// At the stop, for the capture callback to let go of the gate and for the GPU to hand over the last frame: past it
+    /// the frame before stands in. 54 stops of 2026-11-08/09 (21 machines, 1 % of all) hung here for good.
+    /// </summary>
+    private static readonly TimeSpan LastFrameWait = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan DrainTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan FfmpegExitTimeout = TimeSpan.FromSeconds(20);
     /// <summary>After the stop signal: past the limits above, a step that never returns ends the process (see the watchdog).</summary>
@@ -205,23 +210,27 @@ public static class RecordCommand
         }
 
         long sourceFrames = 0, starvedFrames = 0, readbackMs = 0, readbackMaxMs = 0;
-        void ShowPending()
+        string[] captureStep = ["idle"];   // what the capture callback is in, for a stop that waits on it
+        // False when the GPU did not hand the frame over within readWait (the stop's bounded read).
+        bool ShowPending(TimeSpan? readWait = null)
         {
-            if (pending is not { } p) return;
+            if (pending is not { } p) return true;
             pending = null;
             // Runs under the gate, which the stop path takes: when ffmpeg is a whole pool behind, this frame goes and the
             // one on screen stands in (duplicated by the grid), rather than everything waiting on ffmpeg.
             if (!writer!.TryRent(RentWait, out var incoming))
             {
                 starvedFrames++;
-                return;
+                return true;
             }
             long started = Stopwatch.GetTimestamp();
-            converter!.Read(p.Staging, incoming);
+            bool read = converter!.Read(p.Staging, incoming, readWait);
             long ms = (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds;
             readbackMs += ms;
             readbackMaxMs = Math.Max(readbackMaxMs, ms);
-            Emit(resampler.Advance(p.T), incoming);
+            if (read) Emit(resampler.Advance(p.T), incoming);
+            else writer.Submit(incoming, []);   // back to the pool unused
+            return read;
         }
 
         long sizeChangedFrames = 0;
@@ -246,44 +255,55 @@ public static class RecordCommand
 
         framePool.FrameArrived += (pool, _) =>
         {
-            lock (gate)
+            Volatile.Write(ref captureStep[0], "gate");
+            try
             {
-                using var frame = pool.TryGetNextFrame();
-                if (stopped || frame is null) return;
-                if (encoder is null && (frame.ContentSize.Width != frameWidth || frame.ContentSize.Height != frameHeight))
+                lock (gate)
                 {
-                    (frameWidth, frameHeight) = (frame.ContentSize.Width, frame.ContentSize.Height);
-                    framePool.Recreate(winRtDevice, DirectXPixelFormat.B8G8R8A8UIntNormalized, 2, frame.ContentSize);
-                    return;
-                }
-                if (opts.Probe)
-                {
-                    if (Probe(frame)) stop.Set();
-                    return;
-                }
-                encoder ??= StartEncoder();
-                if (frame.ContentSize.Width != frameWidth || frame.ContentSize.Height != frameHeight)
-                {
-                    // The game changed size or mode (alt-tab out of fullscreen): its frames no longer fit the video, so the
-                    // last good frame stays on screen (GridResampler duplicates it) until the size is back or the stop.
-                    sizeChangedFrames++;
-                    return;
-                }
-                if (writer!.Error is string writeError)
-                {
-                    error = writeError;
-                    stopped = true;
-                    stop.Set();
-                    return;
-                }
-                double t = frame.SystemRelativeTime.TotalMilliseconds;  // QPC-based, same clock as QpcClock.NowMs()
-                firstFrameLatencyMs ??= QpcClock.NowMs() - t;
-                sourceFrames++;
+                    Volatile.Write(ref captureStep[0], "next frame");
+                    using var frame = pool.TryGetNextFrame();
+                    if (stopped || frame is null) return;
+                    if (encoder is null && (frame.ContentSize.Width != frameWidth || frame.ContentSize.Height != frameHeight))
+                    {
+                        (frameWidth, frameHeight) = (frame.ContentSize.Width, frame.ContentSize.Height);
+                        framePool.Recreate(winRtDevice, DirectXPixelFormat.B8G8R8A8UIntNormalized, 2, frame.ContentSize);
+                        return;
+                    }
+                    if (opts.Probe)
+                    {
+                        if (Probe(frame)) stop.Set();
+                        return;
+                    }
+                    encoder ??= StartEncoder();
+                    if (frame.ContentSize.Width != frameWidth || frame.ContentSize.Height != frameHeight)
+                    {
+                        // The game changed size or mode (alt-tab out of fullscreen): its frames no longer fit the video, so the
+                        // last good frame stays on screen (GridResampler duplicates it) until the size is back or the stop.
+                        sizeChangedFrames++;
+                        return;
+                    }
+                    if (writer!.Error is string writeError)
+                    {
+                        error = writeError;
+                        stopped = true;
+                        stop.Set();
+                        return;
+                    }
+                    double t = frame.SystemRelativeTime.TotalMilliseconds;  // QPC-based, same clock as QpcClock.NowMs()
+                    firstFrameLatencyMs ??= QpcClock.NowMs() - t;
+                    sourceFrames++;
 
-                using var texture = CaptureInterop.Texture(frame.Surface);
-                var staging = converter!.Convert(texture);
-                ShowPending();
-                pending = (staging, t);
+                    Volatile.Write(ref captureStep[0], "convert");
+                    using var texture = CaptureInterop.Texture(frame.Surface);
+                    var staging = converter!.Convert(texture);
+                    Volatile.Write(ref captureStep[0], "readback");
+                    ShowPending();
+                    pending = (staging, t);
+                }
+            }
+            finally
+            {
+                Volatile.Write(ref captureStep[0], "idle");
             }
         };
         item.Closed += (_, _) => stop.Set();
@@ -327,11 +347,15 @@ public static class RecordCommand
         audio?.End(stopQpcMs);  // the sound ends here, whatever the video's drain takes
         var stopClock = Stopwatch.StartNew();
         var phase = Stopwatch.StartNew();
-        string[] stopStep = ["last frames"];
+        string[] stopStep = ["capture gate"];
         bool[] drained = [false];
+        string? stopNote = null;   // the last frame was given up, and why
+        long tailFrames = 0;       // frames after the given-up one showing the frame before
+        StopTiming? stopTiming = null;
+        int? ffmpegExit = null;
         void Step(string name) => Volatile.Write(ref stopStep[0], name);
 
-        Dictionary<string, object?> Meta(long frames, int? ffmpegExit, StopTiming? stopTiming, string? problem, AudioStatus? audioStatus) => new()
+        Dictionary<string, object?> Meta(long frames, int? exit, StopTiming? timing, string? problem, AudioStatus? audioStatus) => new()
         {
             ["capture_id"] = Guid.NewGuid().ToString("N"),
             ["tool_version"] = BuildInfo.Version,
@@ -359,8 +383,8 @@ public static class RecordCommand
             ["readback_ms"] = readbackMs,
             ["readback_max_ms"] = readbackMaxMs,
             ["first_frame_capture_latency_ms"] = firstFrameLatencyMs,
-            ["ffmpeg_exit_code"] = ffmpegExit,
-            ["stop"] = stopTiming?.ToNode(),
+            ["ffmpeg_exit_code"] = exit,
+            ["stop"] = timing?.ToNode(),
             ["error"] = problem,
             ["audio"] = audioStatus is null ? null : new Dictionary<string, object?>
             {
@@ -377,22 +401,24 @@ public static class RecordCommand
                 Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
             }));
 
-        // Watchdog: the limits below add up to ~31 s, but a Windows call on the stop path can simply never return (WGC,
+        // Watchdog: the limits below add up to ~35 s, but a Windows call on the stop path can simply never return (WGC,
         // D3D or WASAPI teardown on the host PCs of 2026-11-06/07; which one, this names). Then the recording is ended
         // with what is on disk: recording.json and the stopped status say where it stuck, this process exits, ffmpeg
         // (a child with its own stdin pipe) sees the end of its input and finishes video_raw.mp4, and the capture host
-        // finalizes it. The exit code is 0 when every frame had reached ffmpeg (the hang was in teardown).
+        // finalizes it. The exit code is 0 when every frame had reached ffmpeg: the files are finished before the
+        // capture is torn down, so a hang in the teardown costs nothing.
         using var watchdog = new Timer(_ =>
         {
-            string where = Volatile.Read(ref stopStep[0]);
+            string where = Volatile.Read(ref stopStep[0]), callback = Volatile.Read(ref captureStep[0]);
             bool complete = Volatile.Read(ref drained[0]);
             long frames = writer?.Written ?? 0;
-            string problem = $"stop stuck in '{where}' after {stopClock.Elapsed.TotalSeconds:0} s; ended with what is on disk" +
-                             (complete ? "" : " (frames may be missing)");
+            string problem = $"stop stuck in '{where}' after {stopClock.Elapsed.TotalSeconds:0} s" +
+                             (callback == "idle" ? "" : $" (capture callback in '{callback}')") +
+                             "; ended with what is on disk" + (complete ? "" : " (frames may be missing)");
             Console.Error.WriteLine(problem);
             try
             {
-                WriteRecordingJson(Meta(frames, null, null, problem, AudioNow()));
+                WriteRecordingJson(Meta(frames, ffmpegExit, stopTiming, problem, AudioNow()));
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             {
@@ -400,22 +426,39 @@ public static class RecordCommand
             }
             if (opts.JsonStatus)
                 Console.WriteLine(new RecorderStatus(RecorderStatus.Stopped, frames, resampler.Duplicates, resampler.DroppedSourceFrames,
-                    width, height, opts.Fps, complete ? null : problem, Starved: starvedFrames, LeadingBlack: resampler.LeadingBlackFrames).ToJson());
+                    width, height, opts.Fps, complete ? null : problem, Stop: stopTiming, Starved: starvedFrames,
+                    LeadingBlack: resampler.LeadingBlackFrames).ToJson());
             Console.Out.Flush();
             Console.Error.Flush();
             Environment.Exit(complete ? 0 : 1);
         }, null, StopWatchdog, Timeout.InfiniteTimeSpan);
 
-        lock (gate)
+        // The last frame: the one the capture callback converted but has not read back, then the ticks up to the stop.
+        // Neither the callback's gate nor the GPU readback is waited for past LastFrameWait: a stop hung in one of them
+        // (54 rounds lost on 2026-11-08/09) now costs that frame, the frame before standing in until the stop.
+        bool locked = Monitor.TryEnter(gate, LastFrameWait);
+        try
         {
+            if (!locked)
+                stopNote = $"the capture callback did not let go within {LastFrameWait.TotalSeconds:0} s (in '{Volatile.Read(ref captureStep[0])}')";
             encoder ??= StartEncoder();
             if (!stopped)
             {
+                Step("last frame readback");
+                if (locked && !ShowPending(LastFrameWait))
+                    stopNote = $"the GPU did not hand over the last frame within {LastFrameWait.TotalSeconds:0} s";
                 stopped = true;
-                ShowPending();
-                Emit(resampler.Finish(stopQpcMs), null);
+                Step("last ticks");
+                var tail = resampler.Finish(stopQpcMs);
+                if (stopNote is not null) tailFrames = tail.Count;
+                Emit(tail, null);
             }
         }
+        finally
+        {
+            if (locked) Monitor.Exit(gate);
+        }
+        if (stopNote is not null) Console.Error.WriteLine($"stop: {stopNote}; the last {tailFrames} frame(s) show the frame before");
         Step("drain");
         drained[0] = writer!.Complete(DrainTimeout);
         error ??= writer.Error;
@@ -423,10 +466,6 @@ public static class RecordCommand
         long drainMs = phase.ElapsedMilliseconds;
         Step("frame log");
         frameLog.Flush();
-        Step("capture session");
-        session.Dispose();
-        Step("frame pool");
-        framePool.Dispose();
         phase.Restart();
         Step("ffmpeg input");
         encoder.EndVideo();  // ffmpeg flushes the encoder while the audio file is padded and closed
@@ -437,19 +476,23 @@ public static class RecordCommand
         var audioStatus = AudioNow();
         phase.Restart();
         Step("ffmpeg exit");
-        int ffmpegExit = encoder.Finish(FfmpegExitTimeout);
-        var stopTiming = new StopTiming(drainMs, audioMs, phase.ElapsedMilliseconds, FfmpegKilled: ffmpegExit == -1);
+        ffmpegExit = encoder.Finish(FfmpegExitTimeout);
+        stopTiming = new StopTiming(drainMs, audioMs, phase.ElapsedMilliseconds, ffmpegExit == -1, stopNote, tailFrames);
         if (ffmpegExit == -1) error ??= $"ffmpeg did not exit after the end of its input (encoder {encoder.Encoder}); killed, the video keeps the fragments written before";
+        Step("recording.json");
+        var meta = Meta(framesWritten, ffmpegExit, stopTiming, error, audioStatus);
+        WriteRecordingJson(meta);
+        // The files are complete: what follows can hang without costing them.
+        Step("capture session");
+        session.Dispose();
+        Step("frame pool");
+        framePool.Dispose();
         Step("ffmpeg dispose");
         encoder.Dispose();
         Step("audio dispose");
         audio?.Dispose();
         Step("converter dispose");
         converter?.Dispose();
-        Step("recording.json");
-
-        var meta = Meta(framesWritten, ffmpegExit, stopTiming, error, audioStatus);
-        WriteRecordingJson(meta);
         watchdog.Dispose();
 
         if (error is null && ffmpegExit != 0) error = $"ffmpeg exited with code {ffmpegExit}";

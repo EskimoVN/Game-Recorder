@@ -118,7 +118,8 @@ to send with a report, from the named player's PC:
 - `data\logs\odx-app-<date>.log` (the whole day).
 - The round folder's `raw\recording.json` and `raw\round.json`, and `player.json`.
 - For a frozen video: the Task Manager observation above and the PC's GPU and CPU (dxdiag), desktop or laptop.
-- For a stop that stuck (`stop stuck in '<step>'` in the log): Windows build (`winver`), GPU driver version, audio device.
+- For a stop that stuck (`stop stuck in '<step>'` or `stop: the capture callback did not let go` in the log): Windows
+  build (`winver`), GPU driver version, audio device.
 
 A quick self-check before a session, on any PC: open the game, join a room, go Ready and let the host run a 1-minute
 test round. The notice says `every player kept it` or names the problem.
@@ -129,6 +130,19 @@ Two machines signed in with the same Player ID: the orchestrator keeps one conne
 round reach whichever machine connected last and the other one records on without ever reporting (2026-11-08: seven
 rounds of "alan" lost this way). The second machine is now turned away with this message in its status line; set a Player
 ID of its own in its settings. A machine replacing one that is gone (closed, or its network lost for 15 s) gets in.
+
+## "stop: the capture callback did not let go" / "the GPU did not hand over the last frame"
+
+At the stop the recorder reads the last captured frame back from the GPU. On 2026-11-08/09 that step hung for good on 1 %
+of the stops (54 rounds, 21 machines, no pattern by PC, host or round length); the watchdog ended the recorder after 40 s
+with the last frames missing (`739/743 frames`), and the whole room recorded the round again. From 0.3.0 the stop waits
+2 s for the capture callback and for the GPU, then gives the last frame up: the frame before stands in until round_end
+(`duplicate` rows in `video_frames.csv`), the files are finished before the capture is torn down, and the round is kept.
+The log line above says which of the two did not answer and, for the callback, what it was in (`next frame`,
+`convert`, `readback`); `raw\recording.json` → `stop.note` and `stop.tail_frames` keep it. Up to 2 standing-in frames
+is `ok`; more means the game's frames had stopped arriving before the stop, and the round is `degraded` with
+`stop: …; the last N frames show the frame before`. Send the log and `recording.json` of such a round: the step named
+there is what is left to fix.
 
 ## No notice after a round
 

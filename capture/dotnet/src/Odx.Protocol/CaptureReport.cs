@@ -20,8 +20,12 @@ namespace Odx.Protocol;
 /// <param name="GridOriginOffsetMs">Frame 0 against round_start by the full clock fit, when the grid was aligned.</param>
 /// <param name="Failure">Why the capture failed (the capture host's one line); null when it did not.</param>
 /// <param name="AudioError">Why the sound stopped or did not end cleanly; null when it was fine.</param>
+/// <param name="StopNote">The stop gave up the last captured frame (the capture callback or the GPU did not answer in
+/// time), and why; null when it got it.</param>
+/// <param name="TailFrames">With <paramref name="StopNote"/>: frames at the end that show the frame before instead.</param>
 public sealed record CaptureReport(long Frames, long? RoundFrames, double Fps, long Duplicates, long Starved, long LeadingBlack,
-    bool Video, string? Audio, string? GridOrigin, double? GridOriginOffsetMs, string? Failure, string? AudioError)
+    bool Video, string? Audio, string? GridOrigin, double? GridOriginOffsetMs, string? Failure, string? AudioError,
+    string? StopNote = null, long TailFrames = 0)
 {
     public const string Ok = "ok", Degraded = "degraded", Failed = "failed";
     public const string Aligned = "aligned";
@@ -35,6 +39,11 @@ public sealed record CaptureReport(long Frames, long? RoundFrames, double Fps, l
     public const double MaxGridOriginOffsetMs = 25;
     /// <summary>Encoder checks need this much recorded first: the first seconds always duplicate (start-up, loading screens).</summary>
     public const double SettleSeconds = 10;
+    /// <summary>
+    /// A given-up last frame costs this many frames at the end at most (the frame before stands in); more means the
+    /// capture had stopped delivering frames before the stop, which the data's reader must know.
+    /// </summary>
+    public const long MaxTailFrames = 2;
 
     [JsonIgnore]
     public string Verdict =>
@@ -53,6 +62,8 @@ public sealed record CaptureReport(long Frames, long? RoundFrames, double Fps, l
         else if (GridOriginOffsetMs is double off && Math.Abs(off) > MaxGridOriginOffsetMs)
             problems.Add($"frame 0 off round_start by {off:+0;-0} ms");
         if (AudioError is not null) problems.Add($"audio: {AudioError}");
+        if (StopNote is not null && TailFrames > MaxTailFrames)
+            problems.Add($"stop: {StopNote}; the last {TailFrames} frames show the frame before");
         return problems;
     }
 
