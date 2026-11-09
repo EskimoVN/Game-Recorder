@@ -53,8 +53,8 @@ public static class RecordCommand
     private static readonly TimeSpan LastFrameWait = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan DrainTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan FfmpegExitTimeout = TimeSpan.FromSeconds(20);
-    /// <summary>After the stop signal: past the limits above, a step that never returns ends the process (see the watchdog).</summary>
-    private static readonly TimeSpan StopWatchdog = TimeSpan.FromSeconds(45);
+    /// <summary>After the stop signal: past the limits above (~47 s in all), a step that never returns ends the process (see the watchdog).</summary>
+    private static readonly TimeSpan StopWatchdog = TimeSpan.FromSeconds(55);
 
     public static int Run(string[] args)
     {
@@ -420,7 +420,8 @@ public static class RecordCommand
                 Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
             }));
 
-        // Watchdog: the limits below add up to ~41 s, but a Windows call on the stop path can simply never return (WGC,
+        // Watchdog: the limits below add up to ~47 s (gate 2, readback 3, drain 10, audio 7, ffmpeg 20 + 5 after a kill),
+        // but a Windows call on the stop path can simply never return (WGC,
         // D3D or WASAPI teardown on the host PCs of 2026-11-06/07; which one, this names). Then the recording is ended
         // with what is on disk: recording.json and the stopped status say where it stuck, this process exits, ffmpeg
         // (a child with its own stdin pipe) sees the end of its input and finishes video_raw.mp4, and the capture host

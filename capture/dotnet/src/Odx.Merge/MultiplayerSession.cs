@@ -162,7 +162,8 @@ public static class MultiplayerSession
                 {
                     ["ms"] = Math.Round(gameEnd - cut, 1),
                     ["game_round_end_utc"] = UtcText.Iso(gameEnd),
-                    ["players"] = new JsonArray(round.Players.Where(p => GivenUpAt(round, p) is not null).Select(p => (JsonNode)p.PlayerId).ToArray()),
+                    ["players"] = new JsonArray(round.Players.Where(p => p.StopReason != "permanent_death" && GivenUpAt(round, p) is not null)
+                        .Select(p => (JsonNode)p.PlayerId).ToArray()),
                     ["reason"] = "the stop on these machines gave up the last captured frame (the frame before stood in until " +
                                  "round_end); every stream ends at the last frame all players captured",
                 }

@@ -78,7 +78,7 @@ public interface ICaptureRun
 /// </summary>
 public sealed class CaptureRun : ICaptureRun
 {
-    /// <summary>Until both tools have exited: the recorder's own limits add up to ~41 s and its watchdog ends it at 45 s (RecordCommand), so this never wins.</summary>
+    /// <summary>Until both tools have exited: the recorder's own limits add up to ~47 s and its watchdog ends it at 55 s (RecordCommand), so this never wins.</summary>
     private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(60);
 
     private readonly EventWaitHandle _stop;

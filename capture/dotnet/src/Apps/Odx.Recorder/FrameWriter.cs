@@ -91,8 +91,9 @@ internal sealed class FrameWriter
                 {
                     _encoder.Write(frame ?? _black);
                 }
-                catch (IOException e)
+                catch (Exception e) when (e is IOException or ObjectDisposedException)
                 {
+                    // ObjectDisposedException: the stop closed the pipe under a write ffmpeg was not taking.
                     _error = $"ffmpeg pipe closed: {e.Message}";
                     break;
                 }
