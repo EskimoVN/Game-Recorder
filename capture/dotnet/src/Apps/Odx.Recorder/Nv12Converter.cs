@@ -99,7 +99,7 @@ internal sealed class Nv12Converter : IDisposable
     /// <summary>
     /// Copies the Y plane, then the interleaved UV plane (half height), into <paramref name="frame"/>. Map waits for the
     /// GPU; with <paramref name="wait"/> it is asked not to and polled that long instead: false when the GPU had not
-    /// finished the copy by then (<paramref name="frame"/> untouched).
+    /// finished the copy by then, or refused (a device lost to a reset); <paramref name="frame"/> is untouched.
     /// </summary>
     public bool Read(ID3D11Texture2D staging, byte[] frame, TimeSpan? wait = null)
     {
@@ -112,7 +112,7 @@ internal sealed class Nv12Converter : IDisposable
             {
                 var result = _context.Map(staging, 0, MapMode.Read, Vortice.Direct3D11.MapFlags.DoNotWait, out mapped);
                 if (result.Success) break;
-                if (result != Vortice.DXGI.ResultCode.WasStillDrawing) result.CheckError();
+                if (result != Vortice.DXGI.ResultCode.WasStillDrawing) return false;
                 if (Stopwatch.GetTimestamp() > until) return false;
                 Thread.Sleep(1);
             }

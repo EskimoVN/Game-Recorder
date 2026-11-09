@@ -22,7 +22,7 @@ public class CaptureReportTests
     public void A_given_up_last_frame_is_ok_unless_the_capture_had_stopped_before()
     {
         const string note = "the capture callback did not let go within 2 s (in 'readback')";
-        Assert.Equal(CaptureReport.Ok, Report(stopNote: note, tail: 2).Verdict);   // dung's round of 2026-11-08: 4 frames short before
+        Assert.Equal(CaptureReport.Ok, Report(stopNote: note, tail: 2).Verdict);   // the given-up frame's own ticks at 30 fps
         var r = Report(stopNote: note, tail: 60);
         Assert.Equal(CaptureReport.Degraded, r.Verdict);
         Assert.Equal([$"stop: {note}; the last 60 frames show the frame before"], r.Problems());

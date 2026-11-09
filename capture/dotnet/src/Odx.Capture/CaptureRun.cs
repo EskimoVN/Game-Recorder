@@ -78,7 +78,7 @@ public interface ICaptureRun
 /// </summary>
 public sealed class CaptureRun : ICaptureRun
 {
-    /// <summary>Until both tools have exited: the recorder's own limits add up to ~31 s and its watchdog ends it at 40 s (RecordCommand), so this never wins.</summary>
+    /// <summary>Until both tools have exited: the recorder's own limits add up to ~41 s and its watchdog ends it at 45 s (RecordCommand), so this never wins.</summary>
     private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(60);
 
     private readonly EventWaitHandle _stop;
@@ -339,10 +339,12 @@ public sealed class CaptureRun : ICaptureRun
         {
             errors.Add($"raw logs not moved into {CaptureFolder.RawDir}/: {e.Message}");
         }
+        // Frames the recorder wrote after round_end are cut by the finalize: standing-in frames among them cost nothing.
+        long framesCut = finalize is { Ok: true } f ? Math.Max(0, (status?.Frames ?? 0) - f.Frames) : 0;
         var report = new CaptureReport(finalize?.Frames ?? status?.Frames ?? 0, roundFrames, _fps, status?.Duplicates ?? 0,
             status?.Starved ?? 0, status?.LeadingBlack ?? 0, File.Exists(Path.Combine(SessionDir, VideoFinalize.Output)),
             status?.Audio?.Source, _gridOrigin, build?.Report?.GridOriginOffsetMs, failure, status?.Audio?.Error,
-            status?.Stop?.Note, status?.Stop?.TailFrames ?? 0);
+            status?.Stop?.Note, Math.Max(0, (status?.Stop?.TailFrames ?? 0) - framesCut));
         var result = new RunResult(SessionDir, captureOk, status, inputEvents, errors, build, failure, finalize, report);
         SetPhase(CapturePhase.Done, 100);
         return result;
