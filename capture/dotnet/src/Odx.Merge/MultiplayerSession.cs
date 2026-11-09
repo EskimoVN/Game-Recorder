@@ -162,7 +162,8 @@ public static class MultiplayerSession
                 {
                     ["ms"] = Math.Round(gameEnd - cut, 1),
                     ["game_round_end_utc"] = UtcText.Iso(gameEnd),
-                    ["players"] = new JsonArray(round.Players.Where(p => p.StopReason != "permanent_death" && GivenUpAt(round, p) is not null)
+                    ["players"] = new JsonArray(round.Players.Where(p => p.StopReason != "permanent_death" && p.Verdict != CaptureReport.Failed &&
+                                                                        GivenUpAt(round, p) is not null)
                         .Select(p => (JsonNode)p.PlayerId).ToArray()),
                     ["reason"] = "the stop on these machines gave up the last captured frame (the frame before stood in until " +
                                  "round_end); every stream ends at the last frame all players captured",
@@ -425,12 +426,14 @@ public static class MultiplayerSession
     /// <summary>
     /// Where every stream of the round ends when a stop gave up its last frame(s) on some machine: half a frame before the
     /// first stand-in frame of the player with the most (<see cref="GivenUpAt"/>), among the players stopped by the round's
-    /// end. The client allows a delivered round to end a few seconds before the game's (decided 2026-11-09), and a stop
-    /// that gave up more than <see cref="CaptureReport.MaxTailSeconds"/> failed the round, which was recorded again. Null
-    /// when every stop got its last frame.
+    /// end whose capture did not fail: a failed stream is not delivered as valid and must not shorten the others (a stop
+    /// that gave up more than <see cref="CaptureReport.MaxTailSeconds"/> is one). The client allows a delivered round to
+    /// end a few seconds before the game's (decided 2026-11-09). Null when every stop got its last frame.
     /// </summary>
     private static double? CommonEnd(RoundRecord round) =>
-        round.Players.Where(p => p.StopReason != "permanent_death").Select(p => GivenUpAt(round, p)).Min();
+        round.Players.Where(p => p.StopReason != "permanent_death" && p.Verdict != CaptureReport.Failed &&
+                                 p.Report is { } r && r.TailFrames <= CaptureReport.MaxTailSeconds * r.Fps)
+            .Select(p => GivenUpAt(round, p)).Min();
 
     /// <summary>
     /// Half a frame before this player's first stand-in frame (<see cref="CaptureReport.TailFrames"/>: the recorder cut
@@ -440,7 +443,7 @@ public static class MultiplayerSession
     private static double? GivenUpAt(RoundRecord round, RoundPlayer player)
     {
         if (player.Report is not { TailFrames: > 0, Fps: > 0 } r || (player.StopUtcMs ?? round.EndUtcMs) is not double stop) return null;
-        long frames = (long)Math.Ceiling((stop - round.StartUtcMs) * r.Fps / 1000 - 1e-6);
+        long frames = VideoFinalize.RoundFrames(round.StartUtcMs, stop, r.Fps);
         return round.StartUtcMs + (frames - r.TailFrames - 0.5) * 1000 / r.Fps;
     }
 

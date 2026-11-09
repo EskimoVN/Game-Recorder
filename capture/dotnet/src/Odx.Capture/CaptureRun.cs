@@ -79,7 +79,9 @@ public interface ICaptureRun
 public sealed class CaptureRun : ICaptureRun
 {
     /// <summary>Until both tools have exited: the recorder's own limits add up to ~47 s and its watchdog ends it at 55 s (RecordCommand), so this never wins.</summary>
-    private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(75);
+    /// <summary>After the recorder's stopped status, which follows its files: a teardown that hangs past this is killed without fault.</summary>
+    private static readonly TimeSpan ExitGrace = TimeSpan.FromSeconds(10);
 
     private readonly EventWaitHandle _stop;
     private readonly List<string> _stderr = [];
@@ -283,12 +285,26 @@ public sealed class CaptureRun : ICaptureRun
         _stop.Set();
         if (_phase == CapturePhase.Recording) SetPhase(CapturePhase.Stopping, 0);
         string? failure = null;
+        bool recordKilledLate = false;
         // The capture stops: both tools exit (the recorder after its stop path, bounded by its watchdog).
         using (var timeout = new CancellationTokenSource(StopTimeout))
         {
             try
             {
-                await Task.WhenAll(input.WaitForExitAsync(timeout.Token), recordExited.WaitAsync(timeout.Token));
+                var exits = Task.WhenAll(input.WaitForExitAsync(timeout.Token), recordExited.WaitAsync(timeout.Token));
+                if (await Task.WhenAny(exits, _recorderStopped.Task) != exits)
+                {
+                    // The stopped status is out, so the files are complete (recording.json goes before it): the capture
+                    // teardown after it may hang in WGC, D3D or a driver (a readback thread the stop abandoned, 2026-11-09)
+                    // and is given ExitGrace, then killed without fault.
+                    if (await Task.WhenAny(exits, Task.Delay(ExitGrace, timeout.Token)) != exits && !record.HasExited)
+                    {
+                        record.Kill();
+                        recordKilledLate = true;
+                        lock (_stderr) _stderr.Add($"odx record did not exit within {ExitGrace.TotalSeconds:0} s of its stopped status; killed (its files were complete)");
+                    }
+                }
+                await exits;
             }
             catch (OperationCanceledException)
             {
@@ -306,8 +322,8 @@ public sealed class CaptureRun : ICaptureRun
         _captureStopped.TrySetResult();
         await Task.WhenAll(input.WaitForExitAsync(), recordExited);
 
-        bool captureOk = input.ExitCode == 0 && record.ExitCode == 0;
         var status = LastStatus is { Event: RecorderStatus.Stopped } stopped ? stopped : null;
+        bool captureOk = input.ExitCode == 0 && (record.ExitCode == 0 || recordKilledLate && status is { Error: null });
         if (!captureOk)
             failure ??= status?.Error ?? (record.ExitCode != 0 ? $"odx record exited with {record.ExitCode}" : $"odx input exited with {input.ExitCode}");
         // A killed recorder leaves its ffmpeg finishing video_raw.mp4; then the round's frames become video.mp4.

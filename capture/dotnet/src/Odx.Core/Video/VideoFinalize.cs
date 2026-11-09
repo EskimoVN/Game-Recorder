@@ -96,8 +96,11 @@ public static class VideoFinalize
     {
         double? fps = Number(recording, "fps"), start = Number(recording, "round_start_utc_ms"), end = Number(recording, "round_end_utc_ms");
         if (fps is not > 0 || start is null || end is null || end <= start || Number(recording, "grid_origin_qpc_ms") is null) return null;
-        return (long)Math.Ceiling((end.Value - start.Value) * fps.Value / 1000 - 1e-6);
+        return RoundFrames(start.Value, end.Value, fps.Value);
     }
+
+    /// <summary>Grid ticks from round_start up to round_end: the frames a round's video has on every machine (odx merge counts the same way).</summary>
+    public static long RoundFrames(double startUtcMs, double endUtcMs, double fps) => (long)Math.Ceiling((endUtcMs - startUtcMs) * fps / 1000 - 1e-6);
 
     /// <summary>
     /// Finalizes a capture folder whose video.mp4 is missing while video_raw.mp4 exists, cut to the round's frames when
