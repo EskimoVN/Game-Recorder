@@ -31,10 +31,28 @@ public sealed partial class MatchCoordinator
             return;
         }
         var resumed = new Effects();
+        AgentLink? elsewhere = null;
         lock (_lock)
         {
-            _agents[hello.PlayerId] = link;
-            Resume(link, resumed);
+            // Two machines on one player id get each other's Start and Stop: the second is turned away (2026-11-08, "alan").
+            if (_agents.GetValueOrDefault(hello.PlayerId) is { } other && other.Socket.State == WebSocketState.Open &&
+                other.Hello.MachineId != hello.MachineId)
+                elsewhere = other;
+            else
+            {
+                _agents[hello.PlayerId] = link;
+                Resume(link, resumed);
+            }
+        }
+        if (elsewhere is not null)
+        {
+            log.LogWarning("agent {Player} ({Name}) refused: the id is in use on another machine ({Other})", hello.PlayerId,
+                hello.Name, elsewhere.Hello.Name);
+            await socket.SendAsync(Encoding.UTF8.GetBytes(new RoomError(
+                $"player id '{hello.PlayerId}' is in use on another machine ({elsewhere.Hello.Name}); set a player id of your own").ToJson()),
+                WebSocketMessageType.Text, true, stop);
+            await socket.CloseAsync(WebSocketCloseStatus.PolicyViolation, "player id in use", stop);
+            return;
         }
         log.LogInformation("agent {Player} ({Name}, {Version}) connected", hello.PlayerId, hello.Name, hello.ToolVersion);
         await SendAsync(link, new Welcome(timePort, _profileJson, (int)options.ReconnectGrace.TotalMilliseconds,

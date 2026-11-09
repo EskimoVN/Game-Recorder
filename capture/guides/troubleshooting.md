@@ -123,6 +123,13 @@ to send with a report, from the named player's PC:
 A quick self-check before a session, on any PC: open the game, join a room, go Ready and let the host run a 1-minute
 test round. The notice says `every player kept it` or names the problem.
 
+## "player id 'X' is in use on another machine"
+
+Two machines signed in with the same Player ID: the orchestrator keeps one connection per id, so the Start and Stop of a
+round reach whichever machine connected last and the other one records on without ever reporting (2026-11-08: seven
+rounds of "alan" lost this way). The second machine is now turned away with this message in its status line; set a Player
+ID of its own in its settings. A machine replacing one that is gone (closed, or its network lost for 15 s) gets in.
+
 ## No notice after a round
 
 The notices show in the top right corner of the main screen for 6–10 s. If none came, look at the app's status line and

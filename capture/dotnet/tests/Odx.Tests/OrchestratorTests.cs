@@ -686,6 +686,23 @@ public sealed class OrchestratorTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task APlayerIdInUseOnAnotherMachineIsTurnedAwayWithTheReason()
+    {
+        var (host, _, code) = await HostRoom("p1");
+        var refused = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var twin = new AgentClient(new AgentOptions(_http.BaseAddress!, "p1", "P1 elsewhere", Path.Combine(_root, "agent-twin"), null,
+            RoomCode: code, MachineId: "another-machine"), _ => throw new InvalidOperationException("no capture"));
+        twin.RoomError += m => refused.TrySetResult(m);
+        using var twinStop = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);
+        _ = twin.RunAsync(twinStop.Token);
+
+        Assert.Contains("player id 'p1' is in use on another machine (P1)", await refused.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+        twinStop.Cancel();
+        Assert.Single((await RoomStatus(code))["members"]!.AsArray());
+        Assert.Equal("P1", (string?)(await RoomStatus(code))["members"]![0]!["name"]);
+    }
+
+    [Fact]
     public async Task AHostCannotStartARoundWhileSomeoneStillSavesTheLastOne()
     {
         string template = SessionFixtures.MakeValidSession(Path.Combine(_root, "template"));

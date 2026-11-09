@@ -21,7 +21,7 @@ namespace Odx.Agent;
 /// the check.</param>
 public sealed record AgentOptions(Uri Orchestrator, string PlayerId, string Name, string OutputRoot, string? WindowProcess,
     string? RoomCode = null, bool CreateRoom = false, bool AutoReady = false, string? AccessKey = null, bool Lan = false,
-    string? TimeServer = null);
+    string? TimeServer = null, string? MachineId = null);
 
 /// <param name="Status">"joining", "ok", "zerotier_missing" (not installed, or its tray app never ran), "error".</param>
 /// <param name="Address">This machine's IP on the room's LAN once "ok"; the error text for "error".</param>
@@ -197,7 +197,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
                 recording = new[] { _runSessionId, _startingSessionId }.OfType<string>().Distinct().ToList();
                 unconfirmed = [.. _unconfirmed.Values];
             }
-            await SendAsync(new Hello(options.PlayerId, options.Name, BuildInfo.Version, MachineId, SignedInSteamId(),
+            await SendAsync(new Hello(options.PlayerId, options.Name, BuildInfo.Version, options.MachineId ?? MachineId, SignedInSteamId(),
                 Recording: recording.Count > 0 ? recording : null, Protocol: AgentMessage.Version), stop);
             Log?.Invoke($"connected to {options.Orchestrator} as {options.PlayerId}");
             foreach (var done in unconfirmed) await SendAsync(done, stop);
