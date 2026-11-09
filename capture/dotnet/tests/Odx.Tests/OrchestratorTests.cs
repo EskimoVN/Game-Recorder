@@ -682,7 +682,7 @@ public sealed class OrchestratorTests : IAsyncLifetime
         await host.ToggleRoundAsync(0, default);
         string again = await kept.Task.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.Equal("task-42", Path.GetFileName(again));
-        Assert.Single(Directory.GetDirectories(Path.GetDirectoryName(again)!, "task-42.replaced-*"));
+        Assert.Single(Directory.GetDirectories(Path.GetDirectoryName(again)!, "task-42*"));   // the earlier take is gone
     }
 
     [Fact]

@@ -542,8 +542,20 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
         CancellationToken stopped;
         lock (_gate) stopped = _stopBeforeStart!.Token;
         if (s.CountdownMs > 0) Countdown?.Invoke(s.CountdownMs, stopped);
-        if (MoveAside(Path.Combine(options.OutputRoot, s.SessionId), "replaced") is { } earlier)
-            Log?.Invoke($"{s.SessionId}: the earlier take moved to {earlier}");
+        string folder = Path.Combine(options.OutputRoot, s.SessionId);
+        if (Directory.Exists(folder))
+        {
+            // A task id typed again is a new take of that round: the earlier one goes, the new one takes its name.
+            try
+            {
+                Directory.Delete(folder, recursive: true);
+                Log?.Invoke($"{s.SessionId}: the earlier take deleted");
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                Log?.Invoke($"{s.SessionId}: cannot delete the earlier take {folder}: {e.Message}");
+            }
+        }
         string? etl = await StartPacketsAsync(s.SessionId, stop);
         ICaptureRun run;
         try

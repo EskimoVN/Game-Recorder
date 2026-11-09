@@ -177,15 +177,15 @@ public sealed class GameServerAgent(GameServerAgentOptions options, IGameServerR
         string dir = Path.Combine(options.WorkDir, sessionId);
         if (Directory.Exists(dir))
         {
-            string aside = $"{dir}.replaced-{DateTime.Now:yyyyMMdd-HHmmss}";
+            // A task id typed again is a new take of that round: the earlier one goes, the new one takes its name.
             try
             {
-                Directory.Move(dir, aside);
-                log.LogInformation("{Session}: the earlier take moved to {Aside}", sessionId, aside);
+                Directory.Delete(dir, recursive: true);
+                log.LogInformation("{Session}: the earlier take deleted", sessionId);
             }
-            catch (IOException e)
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             {
-                log.LogWarning("{Session}: cannot move {Dir} aside: {Error}", sessionId, dir, e.Message);
+                log.LogWarning("{Session}: cannot delete the earlier take {Dir}: {Error}", sessionId, dir, e.Message);
             }
         }
         Directory.CreateDirectory(Path.Combine(dir, "server"));

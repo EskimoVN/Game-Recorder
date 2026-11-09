@@ -19,13 +19,12 @@ public class CaptureReportTests
     }
 
     [Fact]
-    public void A_given_up_last_frame_is_ok_unless_the_capture_had_stopped_before()
+    public void A_given_up_last_frame_fails_the_round_whatever_the_frames()
     {
         const string note = "the capture callback did not let go within 2 s (in 'readback')";
-        Assert.Equal(CaptureReport.Ok, Report(stopNote: note, tail: 2).Verdict);   // the given-up frame's own ticks at 30 fps
-        var r = Report(stopNote: note, tail: 60);
-        Assert.Equal(CaptureReport.Degraded, r.Verdict);
-        Assert.Equal([$"stop: {note}; the last 60 frames show the frame before"], r.Problems());
+        var r = Report(stopNote: note, tail: 1);
+        Assert.Equal(CaptureReport.Failed, r.Verdict);
+        Assert.Equal([$"stop: {note}; the last 1 frame(s) show the frame before"], r.Problems());
     }
 
     [Fact]
