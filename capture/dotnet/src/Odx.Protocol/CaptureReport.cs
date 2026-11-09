@@ -20,8 +20,12 @@ namespace Odx.Protocol;
 /// <param name="GridOriginOffsetMs">Frame 0 against round_start by the full clock fit, when the grid was aligned.</param>
 /// <param name="Failure">Why the capture failed (the capture host's one line); null when it did not.</param>
 /// <param name="AudioError">Why the sound stopped or did not end cleanly; null when it was fine.</param>
+/// <param name="StopNote">The stop gave up the last captured frame (the capture callback or the GPU did not answer in
+/// time), and why; null when it got it. A failure: the round is recorded again (decided 2026-11-09).</param>
+/// <param name="TailFrames">With <paramref name="StopNote"/>: frames at the end that show the frame before instead.</param>
 public sealed record CaptureReport(long Frames, long? RoundFrames, double Fps, long Duplicates, long Starved, long LeadingBlack,
-    bool Video, string? Audio, string? GridOrigin, double? GridOriginOffsetMs, string? Failure, string? AudioError)
+    bool Video, string? Audio, string? GridOrigin, double? GridOriginOffsetMs, string? Failure, string? AudioError,
+    string? StopNote = null, long TailFrames = 0)
 {
     public const string Ok = "ok", Degraded = "degraded", Failed = "failed";
     public const string Aligned = "aligned";
@@ -35,10 +39,10 @@ public sealed record CaptureReport(long Frames, long? RoundFrames, double Fps, l
     public const double MaxGridOriginOffsetMs = 25;
     /// <summary>Encoder checks need this much recorded first: the first seconds always duplicate (start-up, loading screens).</summary>
     public const double SettleSeconds = 10;
-
     [JsonIgnore]
     public string Verdict =>
-        !Video || Failure is not null || (RoundFrames is long n && Frames < n) ? Failed : Problems().Count > 0 ? Degraded : Ok;
+        !Video || Failure is not null || StopNote is not null || (RoundFrames is long n && Frames < n) ? Failed
+            : Problems().Count > 0 ? Degraded : Ok;
 
     /// <summary>One line per problem, the one that decides the verdict first; empty when <see cref="Ok"/>.</summary>
     public List<string> Problems()
@@ -53,6 +57,7 @@ public sealed record CaptureReport(long Frames, long? RoundFrames, double Fps, l
         else if (GridOriginOffsetMs is double off && Math.Abs(off) > MaxGridOriginOffsetMs)
             problems.Add($"frame 0 off round_start by {off:+0;-0} ms");
         if (AudioError is not null) problems.Add($"audio: {AudioError}");
+        if (StopNote is not null) problems.Add($"stop: {StopNote}; the last {TailFrames} frame(s) show the frame before");
         return problems;
     }
 

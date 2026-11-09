@@ -117,8 +117,6 @@ public sealed class Strings
     public required string TaskBatchInvalid { get; init; }
     public required Func<string, string> TaskBatchFull { get; init; }
     public required string TaskNotStarted { get; init; }
-    public required Func<string, string> TaskExists { get; init; }
-    public required Func<string, string> TaskUsedOnServer { get; init; }
     public required Func<string, string> EndRound { get; init; }
     public required Func<string, string> ReadyButton { get; init; }
     public required Func<string, string> UnreadyButton { get; init; }
@@ -257,14 +255,12 @@ public sealed class Strings
         WaitingReady = (ready, others) => $"Waiting for players to be ready ({ready}/{others})",
         WaitingSaving = saving => $"Waiting for {saving} player(s) to save the last round…",
         TaskId = "Task ID",
-        TaskIdTooltip = "The round's name: every player's recording and the delivered session go into a folder of this name (letters, digits, _ . -; one per round)",
+        TaskIdTooltip = "The round's name: every player's recording and the delivered session go into a folder of this name (letters, digits, _ . -; typed again, it records that round anew and deletes the earlier take)",
         RecordTimerTooltip = "Recording time: runs from the first recorded frame (after the 3-2-1) until the recording stops",
         TaskBatchMissing = "Type the batch code (e.g. AMRF-001) before starting the round",
         TaskBatchInvalid = "Batch code: letters, digits, _ . - only, starting with a letter or digit, not ending with a dot",
         TaskBatchFull = batch => $"Batch {batch} has its 15 videos: type the next batch code",
         TaskNotStarted = "Round not started",
-        TaskExists = task => $"{task} is already in data\\captures: delete that video or pick another video number",
-        TaskUsedOnServer = task => $"{task} was already used on the server, even if its video is deleted on this PC: pick an unused video number or ask the company to remove this ID",
         TaskIdRequired = "Enter the task ID (the round's folder name: letters, digits, _ . -) before starting the round",
         EndRound = hotkey => $"End round ({hotkey})",
         ReadyButton = hotkey => $"I'm ready ({hotkey})",
@@ -417,14 +413,12 @@ public sealed class Strings
         WaitingReady = (ready, others) => $"Chờ mọi người sẵn sàng ({ready}/{others})",
         WaitingSaving = saving => $"Chờ {saving} người lưu xong round trước…",
         TaskId = "Task ID",
-        TaskIdTooltip = "Tên round: bản ghi của mọi người chơi và session giao đều nằm trong thư mục mang tên này (chữ, số, _ . -; mỗi round một tên)",
+        TaskIdTooltip = "Tên round: bản ghi của mọi người chơi và session giao đều nằm trong thư mục mang tên này (chữ, số, _ . -; nhập lại tên cũ thì quay lại round đó, bản cũ bị xoá)",
         RecordTimerTooltip = "Thời gian quay: tính từ khung hình đầu tiên (sau 3-2-1) đến khi dừng quay",
         TaskBatchMissing = "Nhập mã lô (ví dụ AMRF-001) rồi mới bắt đầu round",
         TaskBatchInvalid = "Mã lô chỉ gồm chữ, số, _ . -, bắt đầu bằng chữ hoặc số, không kết thúc bằng dấu chấm",
         TaskBatchFull = batch => $"Lô {batch} đã đủ 15 video: nhập mã lô tiếp theo",
         TaskNotStarted = "Round chưa bắt đầu",
-        TaskExists = task => $"Đã có video {task} trong data\\captures: xoá video đó hoặc chọn số video khác",
-        TaskUsedOnServer = task => $"{task} đã dùng trên server, kể cả khi đã xoá video trên máy: chọn số video chưa dùng hoặc nhờ công ty xoá mã này",
         TaskIdRequired = "Nhập Task ID (tên thư mục của round: chữ, số, _ . -) rồi mới bắt đầu round",
         EndRound = hotkey => $"Kết thúc round ({hotkey})",
         ReadyButton = hotkey => $"Tôi sẵn sàng ({hotkey})",

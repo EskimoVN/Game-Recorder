@@ -63,7 +63,7 @@ internal sealed class FrameWriter
         }
         catch (InvalidOperationException)
         {
-            // After Complete: a capture callback that was stuck past the stop got here late; its frame is left out.
+            // The queue is closed: a capture callback the stop did not wait for came back after it; its frame is lost.
         }
     }
 

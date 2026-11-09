@@ -175,6 +175,19 @@ public sealed class GameServerAgent(GameServerAgentOptions options, IGameServerR
     private async Task StartAsync(string sessionId)
     {
         string dir = Path.Combine(options.WorkDir, sessionId);
+        if (Directory.Exists(dir))
+        {
+            // A task id typed again is a new take of that round: the earlier one goes, the new one takes its name.
+            try
+            {
+                Directory.Delete(dir, recursive: true);
+                log.LogInformation("{Session}: the earlier take deleted", sessionId);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                log.LogWarning("{Session}: cannot delete the earlier take {Dir}: {Error}", sessionId, dir, e.Message);
+            }
+        }
         Directory.CreateDirectory(Path.Combine(dir, "server"));
         // Sampling first: starting SourceTV waits up to 3 s for its demo, and a short round may end meanwhile.
         var stopSampling = new CancellationTokenSource();

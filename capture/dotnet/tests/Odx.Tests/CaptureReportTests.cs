@@ -6,8 +6,9 @@ namespace Odx.Tests;
 public class CaptureReportTests
 {
     private static CaptureReport Report(long frames = 1416, long? round = 1416, long duplicates = 0, long starved = 0, long black = 0,
-        bool video = true, string? origin = CaptureReport.Aligned, double? offset = 3.2, string? failure = null, string? audioError = null) =>
-        new(frames, round, 30, duplicates, starved, black, video, "process", origin, offset, failure, audioError);
+        bool video = true, string? origin = CaptureReport.Aligned, double? offset = 3.2, string? failure = null, string? audioError = null,
+        string? stopNote = null, long tail = 0) =>
+        new(frames, round, 30, duplicates, starved, black, video, "process", origin, offset, failure, audioError, stopNote, tail);
 
     [Fact]
     public void A_clean_round_is_ok()
@@ -15,6 +16,15 @@ public class CaptureReportTests
         var r = Report();
         Assert.Equal(CaptureReport.Ok, r.Verdict);
         Assert.Empty(r.Problems());
+    }
+
+    [Fact]
+    public void A_given_up_last_frame_fails_the_round_whatever_the_frames()
+    {
+        const string note = "the capture callback did not let go within 2 s (in 'readback')";
+        var r = Report(stopNote: note, tail: 1);
+        Assert.Equal(CaptureReport.Failed, r.Verdict);
+        Assert.Equal([$"stop: {note}; the last 1 frame(s) show the frame before"], r.Problems());
     }
 
     [Fact]

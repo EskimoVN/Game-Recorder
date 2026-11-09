@@ -21,7 +21,7 @@ namespace Odx.Agent;
 /// the check.</param>
 public sealed record AgentOptions(Uri Orchestrator, string PlayerId, string Name, string OutputRoot, string? WindowProcess,
     string? RoomCode = null, bool CreateRoom = false, bool AutoReady = false, string? AccessKey = null, bool Lan = false,
-    string? TimeServer = null);
+    string? TimeServer = null, string? MachineId = null);
 
 /// <param name="Status">"joining", "ok", "zerotier_missing" (not installed, or its tray app never ran), "error".</param>
 /// <param name="Address">This machine's IP on the room's LAN once "ok"; the error text for "error".</param>
@@ -197,7 +197,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
                 recording = new[] { _runSessionId, _startingSessionId }.OfType<string>().Distinct().ToList();
                 unconfirmed = [.. _unconfirmed.Values];
             }
-            await SendAsync(new Hello(options.PlayerId, options.Name, BuildInfo.Version, MachineId, SignedInSteamId(),
+            await SendAsync(new Hello(options.PlayerId, options.Name, BuildInfo.Version, options.MachineId ?? MachineId, SignedInSteamId(),
                 Recording: recording.Count > 0 ? recording : null, Protocol: AgentMessage.Version), stop);
             Log?.Invoke($"connected to {options.Orchestrator} as {options.PlayerId}");
             foreach (var done in unconfirmed) await SendAsync(done, stop);
@@ -542,6 +542,20 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
         CancellationToken stopped;
         lock (_gate) stopped = _stopBeforeStart!.Token;
         if (s.CountdownMs > 0) Countdown?.Invoke(s.CountdownMs, stopped);
+        string folder = Path.Combine(options.OutputRoot, s.SessionId);
+        if (Directory.Exists(folder))
+        {
+            // A task id typed again is a new take of that round: the earlier one goes, the new one takes its name.
+            try
+            {
+                Directory.Delete(folder, recursive: true);
+                Log?.Invoke($"{s.SessionId}: the earlier take deleted");
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                Log?.Invoke($"{s.SessionId}: cannot delete the earlier take {folder}: {e.Message}");
+            }
+        }
         string? etl = await StartPacketsAsync(s.SessionId, stop);
         ICaptureRun run;
         try
@@ -592,15 +606,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
                 _run = null;
                 _runSessionId = null;
             }
-            string aside = $"{result.SessionDir}.cancelled-{DateTime.Now:yyyyMMdd-HHmmss}";
-            try
-            {
-                Directory.Move(result.SessionDir, aside);
-            }
-            catch (IOException e)
-            {
-                Log?.Invoke($"cannot move the cancelled recording aside: {e.Message}");
-            }
+            string aside = MoveAside(result.SessionDir, "cancelled") ?? result.SessionDir;
             await EndWithoutCaptureAsync(s.SessionId, $"round cancelled, recording kept locally only ({aside})", stop, cancelled: true);
             return;
         }
@@ -719,6 +725,23 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
         finally
         {
             _sendLock.Release();
+        }
+    }
+
+    /// <summary>Renames <paramref name="dir"/> to <c>&lt;dir&gt;.&lt;why&gt;-&lt;now&gt;</c>; null when it does not exist or cannot be moved.</summary>
+    private string? MoveAside(string dir, string why)
+    {
+        if (!Directory.Exists(dir)) return null;
+        string aside = $"{dir}.{why}-{DateTime.Now:yyyyMMdd-HHmmss}";
+        try
+        {
+            Directory.Move(dir, aside);
+            return aside;
+        }
+        catch (IOException e)
+        {
+            Log?.Invoke($"cannot move {dir} aside: {e.Message}");
+            return null;
         }
     }
 }

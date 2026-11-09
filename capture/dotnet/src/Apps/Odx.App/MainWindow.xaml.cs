@@ -696,13 +696,11 @@ public partial class MainWindow : Window
             if (agent.Room is null) Disconnect(_ => error);
             else
             {
-                // The orchestrator keeps every task ID it has seen, a cancelled round's or a deleted video's too.
-                string? used = _pendingTask is { } pending && error == $"task id '{pending}' was already used" ? pending : null;
-                SetStatus(t => used is null ? error : t.TaskUsedOnServer(used));
+                SetStatus(_ => error);
                 if (agent.IsHost)
                 {
                     _pendingTask = null;
-                    ToastOverlay.Notify(false, used is null ? error : _t.TaskUsedOnServer(used));  // e.g. the host is in game
+                    ToastOverlay.Notify(false, error);  // e.g. the round refused: the host is in game
                 }
             }
         });
@@ -841,8 +839,6 @@ public partial class MainWindow : Window
         string id = $"{batch}-S{VideoBox.SelectedIndex + 1:00}";
         // Windows drops a trailing dot from a folder name: two task IDs would share one folder.
         if (!Odx.Protocol.ToggleRound.IsValidSessionId(id) || batch.EndsWith('.')) return t.TaskBatchInvalid;
-        // The round would record into that video's folder: the leader deletes it or picks another number.
-        if (Directory.Exists(Path.Combine(PackageFolders.Captures, id))) return t.TaskExists(id);
         task = id;
         return null;
     }

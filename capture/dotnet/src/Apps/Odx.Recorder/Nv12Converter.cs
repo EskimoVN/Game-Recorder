@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Vortice.Direct3D11;
 using Vortice.DXGI;
@@ -95,10 +96,27 @@ internal sealed class Nv12Converter : IDisposable
         return staging;
     }
 
-    /// <summary>Copies the Y plane, then the interleaved UV plane (half height), into <paramref name="frame"/>.</summary>
-    public void Read(ID3D11Texture2D staging, byte[] frame)
+    /// <summary>
+    /// Copies the Y plane, then the interleaved UV plane (half height), into <paramref name="frame"/>. Map waits for the
+    /// GPU; with <paramref name="wait"/> it is asked not to and polled that long instead: false when the GPU had not
+    /// finished the copy by then, or refused (a device lost to a reset); <paramref name="frame"/> is untouched.
+    /// </summary>
+    public bool Read(ID3D11Texture2D staging, byte[] frame, TimeSpan? wait = null)
     {
-        var mapped = _context.Map(staging, 0, MapMode.Read);
+        MappedSubresource mapped;
+        if (wait is null) mapped = _context.Map(staging, 0, MapMode.Read);
+        else
+        {
+            long until = Stopwatch.GetTimestamp() + (long)(wait.Value.TotalSeconds * Stopwatch.Frequency);
+            while (true)
+            {
+                var result = _context.Map(staging, 0, MapMode.Read, Vortice.Direct3D11.MapFlags.DoNotWait, out mapped);
+                if (result.Success) break;
+                if (result != Vortice.DXGI.ResultCode.WasStillDrawing) return false;
+                if (Stopwatch.GetTimestamp() > until) return false;
+                Thread.Sleep(1);
+            }
+        }
         try
         {
             // In a mapped NV12 texture the UV plane starts right after Height rows of the Y plane.
@@ -109,6 +127,7 @@ internal sealed class Nv12Converter : IDisposable
         {
             _context.Unmap(staging, 0);
         }
+        return true;
     }
 
     public void Dispose()
