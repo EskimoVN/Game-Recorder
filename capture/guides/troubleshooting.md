@@ -138,10 +138,14 @@ of the stops (54 rounds, 21 machines, no pattern by PC, host or round length): t
 with the last frames missing (`739/743 frames`) and the room waited that long for the verdict. From 0.3.0 the stop waits
 2 s for the capture callback and for the GPU, then gives the last frame up: the frame before stands in until round_end
 (`duplicate` rows in `video_frames.csv`), the files are finished before the capture is torn down, and the verdict is out
-at once. A given-up frame is a failure all the same (`failed`, the room records the round again: decided 2026-11-09), with
-the log line above saying which of the two did not answer and, for the callback, what it was in (`next frame`,
-`convert`, `readback`); `raw\recording.json` → `stop.note` and `stop.tail_frames` keep it. Send the log and
-`recording.json` of such a round: the step named there is what is left to fix.
+at once. On 0.3.1 the GPU readback itself (a D3D `Map`) still never returned on 7 stops, so from 0.3.2 it runs on its own
+thread and is abandoned after 2 s. The round is kept (decided 2026-11-09, the client allows a round to end a few seconds
+early): the given-up frame usually falls after `round_end` (the stop reaches the machine ~0.1 s later), where the
+finalize cuts anyway, and the player is `ok`; when stand-in frames fall inside the round, the player is `degraded` with
+the log line above and `odx merge` ends every player's stream where all players still captured (`session.json` →
+`end_cut`); over 3 s of stand-in frames the player fails and the room records the round again. The line says which of the
+two did not answer and, for the callback, what it was in (`next frame`, `convert`, `readback`); `raw\recording.json` →
+`stop.note` and `stop.tail_frames` keep it. Send the log and `recording.json` of such a round when it shows up again.
 
 ## No notice after a round
 

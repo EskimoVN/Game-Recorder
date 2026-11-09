@@ -10,18 +10,21 @@ public static class VideoTrim
     /// Writes <paramref name="src"/> from frame <paramref name="startFrame"/> on to <paramref name="dst"/>, re-encoded:
     /// odx record's keyframes are 2–4 s apart, so a copy cut would land anywhere in a 2–3 s pre-roll. The video keeps its
     /// frame rate frame for frame (timestamps rebased, no CFR resampling that could add or drop one); the audio, if any,
-    /// is cut at the same instant and encoded again.
+    /// is cut at the same instants and encoded again.
     /// </summary>
+    /// <param name="endFrame">The first frame left out; null keeps the video to its end.</param>
     /// <exception cref="InvalidOperationException">ffmpeg failed; the message has its stderr.</exception>
-    public static void Trim(string ffmpeg, string src, string dst, int startFrame, double fps, bool hasAudio)
+    public static void Trim(string ffmpeg, string src, string dst, int startFrame, double fps, bool hasAudio, int? endFrame = null)
     {
         var inv = CultureInfo.InvariantCulture;
+        string end = endFrame is int e ? $":end_frame={e.ToString(inv)}" : "";
+        string audioEnd = endFrame is int ea ? $":end={(ea / fps).ToString("F9", inv)}" : "";
         var args = new List<string>
         {
             "-y", "-loglevel", "error", "-i", src,
-            "-vf", $"trim=start_frame={startFrame.ToString(inv)},setpts=PTS-STARTPTS",
+            "-vf", $"trim=start_frame={startFrame.ToString(inv)}{end},setpts=PTS-STARTPTS",
         };
-        if (hasAudio) args.AddRange(["-af", $"atrim=start={(startFrame / fps).ToString("F9", inv)},asetpts=PTS-STARTPTS"]);
+        if (hasAudio) args.AddRange(["-af", $"atrim=start={(startFrame / fps).ToString("F9", inv)}{audioEnd},asetpts=PTS-STARTPTS"]);
         args.AddRange(["-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-bf", "0", "-g", "120", "-pix_fmt", "yuv420p",
                        "-fps_mode", "passthrough"]);
         args.AddRange(hasAudio ? ["-c:a", "aac", "-b:a", "160k"] : ["-an"]);

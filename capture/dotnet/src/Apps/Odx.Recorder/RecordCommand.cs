@@ -212,6 +212,7 @@ public static class RecordCommand
         long sourceFrames = 0, starvedFrames = 0, readbackMs = 0, readbackMaxMs = 0;
         string[] captureStep = ["idle"];   // what the capture callback is in, for a stop that waits on it
         double givenUpT = double.NegativeInfinity;   // capture time of the frame the stop gave up
+        bool readbackAbandoned = false;   // the stop's Map never returned: its thread and buffer are left, D3D is not touched again
         // False when the GPU did not hand the frame over within readWait (the stop's bounded read).
         bool ShowPending(TimeSpan? readWait = null)
         {
@@ -226,12 +227,28 @@ public static class RecordCommand
                 return true;
             }
             long started = Stopwatch.GetTimestamp();
-            bool read = converter!.Read(p.Staging, incoming, readWait);
+            bool read;
+            if (readWait is { } wait)
+            {
+                // The stop's readback, on its own thread: on 2026-11-09 (7 stops, 0.3.1) the Map itself never returned,
+                // DoNotWait or not, with the callback idle; the frame is given up and that thread left where it is.
+                var readback = Task.Run(() => converter!.Read(p.Staging, incoming, wait));
+                try
+                {
+                    read = readback.Wait(wait + TimeSpan.FromSeconds(1)) && readback.Result;
+                }
+                catch (AggregateException)
+                {
+                    read = false;
+                }
+                if (!readback.IsCompleted) readbackAbandoned = true;
+            }
+            else read = converter!.Read(p.Staging, incoming);
             long ms = (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds;
             readbackMs += ms;
             readbackMaxMs = Math.Max(readbackMaxMs, ms);
             if (read) Emit(resampler.Advance(p.T), incoming);
-            else writer.Submit(incoming, []);   // back to the pool unused
+            else if (!readbackAbandoned) writer.Submit(incoming, []);   // back to the pool unused
             return read;
         }
 
@@ -515,9 +532,10 @@ public static class RecordCommand
         encoder.Dispose();
         Step("audio dispose");
         audio?.Dispose();
-        if (locked)
+        if (locked && !readbackAbandoned)
         {
-            // A callback that never let go may still be inside WGC or D3D: these are left to the process exit then.
+            // A callback that never let go, or a readback that never returned, may still be inside WGC or D3D: these are
+            // left to the process exit then.
             Step("capture session");
             session.Dispose();
             Step("frame pool");

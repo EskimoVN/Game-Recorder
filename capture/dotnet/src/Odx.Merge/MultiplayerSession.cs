@@ -52,7 +52,8 @@ public sealed record SessionReport(string SessionId, bool Pass, int ValidPlayers
 /// _work/&lt;session-id&gt;/ players/&lt;id&gt;/ (v2 session.json, raw logs, packets.pcapng) server/ (the game server's own recording)
 /// </code>
 /// Only the vendor tree is delivered (spec v3 §1, key_bindings.json per SOW §2); <see cref="DeliveryFiles"/> checks that
-/// nothing else is in it. Each player's stream is cut to start at round_start (players record from the countdown).
+/// nothing else is in it. Each player's stream is cut to start at round_start (players record from the countdown) and,
+/// when a stop gave up its last frames on some machine, to end where every player still captured (<see cref="CommonEnd"/>).
 /// Every frame gets a server UTC from the player's samples against the orchestrator's time service, so player
 /// events.jsonl carry the time and frame at which each server event happened in that player's video.
 /// </summary>
@@ -110,7 +111,8 @@ public static class MultiplayerSession
         PlayerTimeline.WriteEvents(Path.Combine(dir, "server", "events.jsonl"), events);
         FramesBin.WriteSchema(Path.Combine(dir, FramesBin.SchemaFileName));
 
-        var reports = round.Players.Select(p => AssemblePlayer(round, p, events, profile, cameras, games, stagingDir, dir, work, tol)).ToList();
+        double? endUtc = CommonEnd(round);
+        var reports = round.Players.Select(p => AssemblePlayer(round, p, endUtc, events, profile, cameras, games, stagingDir, dir, work, tol)).ToList();
         int valid = reports.Count(r => r.Pass);
         int required = tol.MinValidPlayers ?? (round.Players.Count <= 3 ? round.Players.Count : round.Players.Count - 1);
         var issues = new List<Issue>();
@@ -144,7 +146,8 @@ public static class MultiplayerSession
                 ["start_trigger"] = round.CountdownMs > 0 ? "host (odx-app), after a countdown" : "game server",
                 ["stop_trigger"] = round.EndReason?.StartsWith("player_stop:", StringComparison.Ordinal) == true ? "host (odx-app)" : "game server",
                 ["recording"] = "from the countdown until the round ends, delivered from the first frame at or after round_start " +
-                                "(player.json pre_roll_frames: how many were cut); a permanent death stops that player",
+                                "(player.json pre_roll_frames: how many were cut); a permanent death stops that player; when a " +
+                                "stop gave up its last frames on a machine, every stream ends where all players still captured (end_cut)",
                 ["respawn_allowed"] = profile?["rules"]?["respawn_allowed"]?.DeepClone(),
             },
             ["map"] = round.Map ?? serverInfo?["map"]?.DeepClone(),
@@ -152,8 +155,18 @@ public static class MultiplayerSession
             ["countdown_ms"] = round.CountdownMs,
             ["end_reason"] = round.EndReason,
             ["created_at_utc"] = UtcText.Iso(round.StartUtcMs),
-            ["ended_at_utc"] = round.EndUtcMs is double end ? UtcText.Iso(end) : null,
-            ["duration_ms"] = round.EndUtcMs is double e2 ? e2 - round.StartUtcMs : null,
+            ["ended_at_utc"] = (endUtc ?? round.EndUtcMs) is double end ? UtcText.Iso(end) : null,
+            ["duration_ms"] = (endUtc ?? round.EndUtcMs) is double e2 ? e2 - round.StartUtcMs : null,
+            ["end_cut"] = endUtc is double cut && round.EndUtcMs is double gameEnd
+                ? new JsonObject
+                {
+                    ["ms"] = Math.Round(gameEnd - cut, 1),
+                    ["game_round_end_utc"] = UtcText.Iso(gameEnd),
+                    ["players"] = new JsonArray(round.Players.Where(p => GivenUpAt(round, p) is not null).Select(p => (JsonNode)p.PlayerId).ToArray()),
+                    ["reason"] = "the stop on these machines gave up the last captured frame (the frame before stood in until " +
+                                 "round_end); every stream ends at the last frame all players captured",
+                }
+                : null,
             ["players"] = new JsonArray(round.Players.Select(p => (JsonNode)new JsonObject
             {
                 ["player_id"] = p.PlayerId,
@@ -204,9 +217,10 @@ public static class MultiplayerSession
         return (dir, report);
     }
 
-    private static PlayerReport AssemblePlayer(RoundRecord round, RoundPlayer player, List<JsonObject> events, JsonObject? profile,
-        IReadOnlyDictionary<string, IServerCameraTrack> cameras, GameModules games, string stagingDir, string sessionDir,
-        string workDir, GateTolerances tol)
+    /// <param name="endUtc">Where every stream of the round ends (<see cref="CommonEnd"/>); null for the game's round_end.</param>
+    private static PlayerReport AssemblePlayer(RoundRecord round, RoundPlayer player, double? endUtc, List<JsonObject> events,
+        JsonObject? profile, IReadOnlyDictionary<string, IServerCameraTrack> cameras, GameModules games, string stagingDir,
+        string sessionDir, string workDir, GateTolerances tol)
     {
         string src = Path.Combine(stagingDir, "players", player.PlayerId);
         string work = Path.Combine(workDir, "players", player.PlayerId);
@@ -250,7 +264,8 @@ public static class MultiplayerSession
 
         var frameUtc = PutFramesOnServerTime(round, src, info, checks, tol);
         double? firstCapturedUtc = frameUtc?[0];
-        if (frameUtc is not null && TrimToRoundStart(round, dst, capture, rows, frameUtc, info, checks) == 0)
+        double? cutUtc = new[] { endUtc, GivenUpAt(round, player) }.Min();
+        if (frameUtc is not null && !TrimToRound(round, cutUtc, dst, capture, rows, frameUtc, info, checks))
             AddDecodedCheck(checks, Path.Combine(dst, "video.mp4"), rows.Count);
         info["network"] = new JsonObject
         {
@@ -278,7 +293,7 @@ public static class MultiplayerSession
         double lateStart = firstCapturedUtc!.Value - round.StartUtcMs;
         checks.Add(new QaCheck("sync.start", $"first frame at most {tol.StartGraceMs} ms after round_start",
             lateStart <= tol.StartGraceMs, $"first frame {lateStart:F0} ms after round_start"));
-        if ((player.StopUtcMs ?? round.EndUtcMs) is double stopAt)
+        if (new[] { player.StopUtcMs ?? round.EndUtcMs, cutUtc }.Min() is double stopAt)
             checks.Add(new QaCheck("sync.end", $"last frame at most {tol.EndGraceMs} ms before the player's stop",
                 stopAt - frameUtc[^1] <= tol.EndGraceMs, $"last frame {stopAt - frameUtc[^1]:F0} ms before the stop"));
 
@@ -407,22 +422,52 @@ public static class MultiplayerSession
     }
 
     /// <summary>
+    /// Where every stream of the round ends when a stop gave up its last frame(s) on some machine: half a frame before the
+    /// first stand-in frame of the player with the most (<see cref="GivenUpAt"/>), among the players stopped by the round's
+    /// end. The client allows a delivered round to end a few seconds before the game's (decided 2026-11-09), and a stop
+    /// that gave up more than <see cref="CaptureReport.MaxTailSeconds"/> failed the round, which was recorded again. Null
+    /// when every stop got its last frame.
+    /// </summary>
+    private static double? CommonEnd(RoundRecord round) =>
+        round.Players.Where(p => p.StopReason != "permanent_death").Select(p => GivenUpAt(round, p)).Min();
+
+    /// <summary>
+    /// Half a frame before this player's first stand-in frame (<see cref="CaptureReport.TailFrames"/>: the recorder cut
+    /// the video at the round's frames from round_start, the last of which show the frame before); null when the stop
+    /// got its last frame.
+    /// </summary>
+    private static double? GivenUpAt(RoundRecord round, RoundPlayer player)
+    {
+        if (player.Report is not { TailFrames: > 0, Fps: > 0 } r || (player.StopUtcMs ?? round.EndUtcMs) is not double stop) return null;
+        long frames = (long)Math.Ceiling((stop - round.StartUtcMs) * r.Fps / 1000 - 1e-6);
+        return round.StartUtcMs + (frames - r.TailFrames - 0.5) * 1000 / r.Fps;
+    }
+
+    /// <summary>
     /// Players record from the countdown, a few seconds before play, and spec v3 §1 makes the round the task boundary: the
     /// delivered stream starts at the frame nearest round_start (within half a frame before it, else the first after:
-    /// a grid placed on round_start lands ±20 ms around it, and "at or after" would cut frame 0 on half the machines).
-    /// The video is re-encoded for a frame-accurate cut (odx record's keyframes are 2–4 s apart), frames.csv is rebased
-    /// (frame 0, timestamp 0), and frames.bin and events.jsonl follow from the rebased rows. Returns the frames cut; 0
-    /// when nothing precedes round_start, when the frame indexes cannot be trusted (video.frame_count already fails) or
-    /// when the cut failed (video.trimmed fails).
+    /// a grid placed on round_start lands ±20 ms around it, and "at or after" would cut frame 0 on half the machines)
+    /// and ends before <paramref name="cutUtc"/> when there is one (<see cref="CommonEnd"/>). The video is re-encoded for
+    /// a frame-accurate cut (odx record's keyframes are 2–4 s apart), frames.csv is rebased (frame 0, timestamp 0), and
+    /// frames.bin and events.jsonl follow from the rebased rows. False when nothing is cut, when the frame indexes cannot
+    /// be trusted (video.frame_count already fails) or when the cut failed (video.trimmed fails).
     /// </summary>
-    private static int TrimToRoundStart(RoundRecord round, string dst, JsonObject capture, List<Dictionary<string, string>> rows,
+    private static bool TrimToRound(RoundRecord round, double? cutUtc, string dst, JsonObject capture, List<Dictionary<string, string>> rows,
         List<double> frameUtc, JsonObject info, List<QaCheck> checks)
     {
+        const string check = "the delivered stream starts at round_start and ends where every player captured (pre-roll / end cut)";
         double fps = capture["fps"]?.GetValue<double>() ?? 0;
         double half = fps > 0 ? 500 / fps : 0;
-        int n = frameUtc.FindIndex(t => t >= round.StartUtcMs - half);
+        int n = Math.Max(0, frameUtc.FindIndex(t => t >= round.StartUtcMs - half));
+        int last = cutUtc is double cut ? frameUtc.FindIndex(t => t >= cut) : -1;
+        if (last < 0) last = rows.Count;
         string video = Path.Combine(dst, "video.mp4");
-        if (n <= 0 || fps <= 0 || !File.Exists(video)) return 0;
+        if ((n == 0 && last == rows.Count) || fps <= 0 || !File.Exists(video)) return false;
+        if (last <= n)
+        {
+            checks.Add(new QaCheck("video.trimmed", check, false, $"no frame left between round_start and the end cut at {UtcText.Iso(cutUtc!.Value)}"));
+            return false;
+        }
         Mp4Info mp4;
         try
         {
@@ -430,17 +475,17 @@ public static class MultiplayerSession
         }
         catch (InvalidDataException)
         {
-            return 0;
+            return false;
         }
-        if (mp4.Frames != rows.Count) return 0;
+        if (mp4.Frames != rows.Count) return false;
         string ffmpeg = ExternalTools.Ffmpeg(), trimmed = video + ".trim.mp4";
         string? error = null;
         try
         {
-            VideoTrim.Trim(ffmpeg, video, trimmed, n, fps, mp4.HasAudio);
+            VideoTrim.Trim(ffmpeg, video, trimmed, n, fps, mp4.HasAudio, last < rows.Count ? last : null);
             long decoded = VideoTrim.DecodedFrameCount(ffmpeg, trimmed), samples = Mp4Reader.Read(trimmed).Frames;
-            if (decoded != rows.Count - n || samples != rows.Count - n)
-                error = $"the trimmed video has {samples} samples and {decoded} decoded frames, expected {rows.Count - n}";
+            if (decoded != last - n || samples != last - n)
+                error = $"the trimmed video has {samples} samples and {decoded} decoded frames, expected {last - n}";
         }
         catch (Exception e) when (e is IOException or InvalidDataException or InvalidOperationException)
         {
@@ -449,10 +494,13 @@ public static class MultiplayerSession
         if (error is not null)
         {
             File.Delete(trimmed);
-            checks.Add(new QaCheck("video.trimmed", "the delivered stream starts at round_start (pre-roll cut)", false, error));
-            return 0;
+            checks.Add(new QaCheck("video.trimmed", check, false, error));
+            return false;
         }
         File.Move(trimmed, video, true);
+        int endCut = rows.Count - last;
+        rows.RemoveRange(last, endCut);
+        frameUtc.RemoveRange(last, endCut);
         long baseMs = long.Parse(rows[n]["timestamp_ms"], CultureInfo.InvariantCulture);
         rows.RemoveRange(0, n);
         frameUtc.RemoveRange(0, n);
@@ -464,14 +512,15 @@ public static class MultiplayerSession
         WriteFrames(Path.Combine(dst, "frames.csv"), rows);
         info["pre_roll_frames"] = n;
         info["pre_roll_ms"] = baseMs;
+        info["end_cut_frames"] = endCut;
         if (info["recording"] is JsonObject recording)
         {
             recording["frame_count"] = rows.Count;
             recording["duration_ms"] = rows.Count * 1000.0 / fps;
         }
-        checks.Add(new QaCheck("video.trimmed", "the delivered stream starts at round_start (pre-roll cut)", true,
-            $"{n} frames ({baseMs} ms) before round_start cut, {rows.Count} kept; re-encoded, every frame decodes"));
-        return n;
+        checks.Add(new QaCheck("video.trimmed", check, true,
+            $"{n} frames ({baseMs} ms) before round_start cut, {endCut} at the end, {rows.Count} kept; re-encoded, every frame decodes"));
+        return true;
     }
 
     /// <summary>Spec v2 §1.5.6 by decoding, not by the sample table: a recorder's cut-short last sample counts there but not here.</summary>
