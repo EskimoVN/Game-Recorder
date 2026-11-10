@@ -60,6 +60,26 @@ public class Arma3CameraTests
     }
 
     [Fact]
+    public void Orthonormalize_fixes_float32_drift_without_flipping_handedness()
+    {
+        // A basis like the addon's: near-orthonormal but off by ~0.1° (a c2w.orthonormal/c2w.det failure, v2 §1.5.3).
+        var right = new Vec3(0.705811, -0.708374, 0.001);
+        var up = new Vec3(0.466553, 0.464966, 0.75235);
+        var forward = new Vec3(0.532959, 0.531006, -0.658768);
+
+        var (r, u, f) = Arma3Camera.Orthonormalize(right, up, forward);
+
+        Assert.Equal(1.0, r.Norm(), 12);
+        Assert.Equal(1.0, u.Norm(), 12);
+        Assert.Equal(1.0, f.Norm(), 12);
+        Assert.Equal(0.0, r.Dot(u), 12);
+        Assert.Equal(0.0, r.Dot(f), 12);
+        Assert.Equal(0.0, u.Dot(f), 12);
+        // C2W columns are right, up, -forward (RUB): det must be +1, as the builder expects.
+        Assert.Equal(1.0, r.Dot(u.Cross(-f)), 12);
+    }
+
+    [Fact]
     public void No_rpt_or_no_rows_is_a_warning()
     {
         string root = Path.Combine(Path.GetTempPath(), $"odx-arma3-{Guid.NewGuid():N}");

@@ -145,8 +145,9 @@ public static class Arma3Camera
             foreach (var r in rows)
             {
                 double qpc = clock.QpcRefMs + (r.UtcMs - clock.UtcAtRefMs) / clock.Slope;
+                var (right, up, forward) = Orthonormalize(r.Right, r.Up, r.Forward);
                 w.Write(Csv.Line(new[] { qpc }
-                    .Concat(new[] { r.Position, r.Forward, r.Right, r.Up }.SelectMany(v => new[] { v.X, v.Y, v.Z }))
+                    .Concat(new[] { r.Position, forward, right, up }.SelectMany(v => new[] { v.X, v.Y, v.Z }))
                     .Append(r.VfovDeg).Select(Frames.FormatDouble)));
             }
         }
@@ -162,6 +163,20 @@ public static class Arma3Camera
 
             """);
         return null;
+    }
+
+    /// <summary>
+    /// Gram-Schmidt on the camera basis, keeping forward exact. The addon's axes are differences of float32
+    /// positionCameraToWorld results, so at Stratis-scale coordinates they drift off orthonormal by ~0.1°
+    /// (arma3.md §5) — just past the validator's 1e-3 (v2 §1.5.3). Re-orthonormalizing restores an exact rotation; the
+    /// corrections are tiny so the handedness is unchanged.
+    /// </summary>
+    public static (Vec3 Right, Vec3 Up, Vec3 Forward) Orthonormalize(Vec3 right, Vec3 up, Vec3 forward)
+    {
+        var f = forward.Normalized();
+        var u = (up - f * up.Dot(f)).Normalized();
+        var r = (right - f * right.Dot(f) - u * right.Dot(u)).Normalized();
+        return (r, u, f);
     }
 
     public static List<Arma3CameraRow> Read(string path)
