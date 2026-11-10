@@ -23,12 +23,12 @@ because Steam refuses logins from AWS addresses, and uploaded by the script; the
 `OdxCapture` mod (`/opt/reforger/addons/`, lowercase `scripts/`) and `reforger/*.txt` (`$profile:odx/`) with HEAD's and
 restarts the systemd unit `reforger`.
 
-`bash create-arma3.sh [server build folder]` creates `arma3-server` (t3.xlarge, 60 GB, Elastic IP, SSH key
-`~/.ssh/arma3-server.pem`, UDP 2302–2305 open): the Arma 3 dedicated server 2.18.152405 with BattlEye off
-(`arma3/server.cfg`), the Custom difficulty with the HUD off (`arma3/odx.Arma3Profile`) and the test mission
-`arma3/mission/odx_test.stratis` (16 playable riflemen on Stratis, respawn at `respawn_west`), packed on the machine by
-`arma3/pack_pbo.py`. The build (content depot 233781 + Linux depot 233783 of app 233780, manifests in
-`document/games/arma3.md`) is downloaded on a PC with DepotDownloader and a Steam account (anonymous login is refused for this
-app; it need not own the game), because Steam refuses logins from AWS addresses, and uploaded by the script; the first run needs
-it. Each run replaces the config, profile and mission with HEAD's and restarts the systemd unit `arma3`. Players join by
+`[ARMA3_INSTANCE_TYPE=m6a.large] bash create-arma3.sh [server build folder]` creates `arma3-server` (m6a.large: 2 vCPU,
+8 GB, ~20 players; 60 GB, Elastic IP, SSH key `~/.ssh/arma3-server.pem`, UDP 2302–2305 open): the Arma 3 dedicated server
+with BattlEye off (`arma3/server.cfg`), the Custom difficulty with the HUD off (`arma3/odx.Arma3Profile`) and the test mission
+`arma3/mission/odx_test.stratis` (24 playable riflemen on Stratis, respawn at `respawn_west`), packed on the machine by
+`arma3/pack_pbo.py`. Without a build folder the machine installs the current stable server itself with SteamCMD (app 233780,
+anonymous login), the version the players' Steam clients are on; a build folder pins a version instead (content depot 233781 +
+Linux depot 233783, manifests in `document/games/arma3.md`, downloaded on a PC with DepotDownloader and uploaded by the
+script). Each run replaces the config, profile and mission with HEAD's and restarts the systemd unit `arma3`. Players join by
 Direct Connect `<IP>:2302` with the password, on the same game version.
