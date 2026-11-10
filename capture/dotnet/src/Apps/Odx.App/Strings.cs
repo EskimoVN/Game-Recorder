@@ -113,6 +113,9 @@ public sealed class Strings
     public required string TaskIdTooltip { get; init; }
     public required string TaskIdRequired { get; init; }
     public required string RecordTimerTooltip { get; init; }
+    public required string SectionSource { get; init; }
+    public required string SectionRoom { get; init; }
+    public required string SectionRecord { get; init; }
     public required string TaskBatchMissing { get; init; }
     public required string TaskBatchInvalid { get; init; }
     public required Func<string, string> TaskBatchFull { get; init; }
@@ -257,6 +260,9 @@ public sealed class Strings
         TaskId = "Task ID",
         TaskIdTooltip = "The round's name: every player's recording and the delivered session go into a folder of this name (letters, digits, _ . -; typed again, it records that round anew and deletes the earlier take)",
         RecordTimerTooltip = "Recording time: runs from the first recorded frame (after the 3-2-1) until the recording stops",
+        SectionSource = "CAPTURE SOURCE",
+        SectionRoom = "ROOM",
+        SectionRecord = "RECORD",
         TaskBatchMissing = "Type the batch code (e.g. AMRF-001) before starting the round",
         TaskBatchInvalid = "Batch code: letters, digits, _ . - only, starting with a letter or digit, not ending with a dot",
         TaskBatchFull = batch => $"Batch {batch} has its 15 videos: type the next batch code",
@@ -415,6 +421,9 @@ public sealed class Strings
         TaskId = "Task ID",
         TaskIdTooltip = "Tên round: bản ghi của mọi người chơi và session giao đều nằm trong thư mục mang tên này (chữ, số, _ . -; nhập lại tên cũ thì quay lại round đó, bản cũ bị xoá)",
         RecordTimerTooltip = "Thời gian quay: tính từ khung hình đầu tiên (sau 3-2-1) đến khi dừng quay",
+        SectionSource = "NGUỒN QUAY",
+        SectionRoom = "PHÒNG",
+        SectionRecord = "QUAY",
         TaskBatchMissing = "Nhập mã lô (ví dụ AMRF-001) rồi mới bắt đầu round",
         TaskBatchInvalid = "Mã lô chỉ gồm chữ, số, _ . -, bắt đầu bằng chữ hoặc số, không kết thúc bằng dấu chấm",
         TaskBatchFull = batch => $"Lô {batch} đã đủ 15 video: nhập mã lô tiếp theo",

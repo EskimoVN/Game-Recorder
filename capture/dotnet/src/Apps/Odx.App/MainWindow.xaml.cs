@@ -135,6 +135,11 @@ public partial class MainWindow : Window
 
     private void ApplyLanguage()
     {
+        SectionSourceText.Text = _t.SectionSource;
+        SectionRoomText.Text = _t.SectionRoom;
+        SectionRecordText.Text = _t.SectionRecord;
+        // "0.3.13+<commit>": the commit stays in recording.json, the window shows the version only.
+        VersionText.Text = Odx.Core.BuildInfo.Version.Split('+')[0];
         LanguageLabel.Content = _t.Language;
         SourceLabel.Content = _t.Source;
         GameLabel.Content = _t.GameProfile;

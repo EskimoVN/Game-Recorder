@@ -52,6 +52,43 @@
         <SolidColorBrush x:Key="RecordTintHoverBrush" Color="#4A2023" />
         <SolidColorBrush x:Key="RecordTintPressedBrush" Color="#2E1517" />
 
+        <!-- One dango per card: sakura = capture source, shiro = room, matcha = recording. -->
+        <SolidColorBrush x:Key="SakuraBrush" Color="#F2A7BE" />
+        <SolidColorBrush x:Key="ShiroBrush" Color="#F3E9D2" />
+        <SolidColorBrush x:Key="MatchaSoftBrush" Color="#8CC79A" />
+        <SolidColorBrush x:Key="RecordChipBrush" Color="#33F25450" />
+        <LinearGradientBrush x:Key="MatchaGradientBrush" StartPoint="0,0" EndPoint="0,1">
+            <GradientStop Color="#9ED3AB" Offset="0" />
+            <GradientStop Color="#7CB98A" Offset="1" />
+        </LinearGradientBrush>
+        <LinearGradientBrush x:Key="MatchaGradientHoverBrush" StartPoint="0,0" EndPoint="0,1">
+            <GradientStop Color="#ABDCB7" Offset="0" />
+            <GradientStop Color="#89C596" Offset="1" />
+        </LinearGradientBrush>
+        <SolidColorBrush x:Key="MatchaGradientPressedBrush" Color="#74AE82" />
+        <SolidColorBrush x:Key="MatchaDeepInkBrush" Color="#0D1F13" />
+        <!-- Stop state: white text on these reds stays above 4.5:1. -->
+        <LinearGradientBrush x:Key="RecordSolidBrush" StartPoint="0,0" EndPoint="0,1">
+            <GradientStop Color="#CC3A36" Offset="0" />
+            <GradientStop Color="#B92D29" Offset="1" />
+        </LinearGradientBrush>
+        <SolidColorBrush x:Key="RecordSolidHoverBrush" Color="#C23430" />
+        <SolidColorBrush x:Key="RecordSolidPressedBrush" Color="#A82824" />
+
+        <!-- Card title: a coloured dot and a small capitalised label. -->
+        <Style x:Key="SectionDot" TargetType="Ellipse">
+            <Setter Property="Width" Value="8" />
+            <Setter Property="Height" Value="8" />
+            <Setter Property="Margin" Value="0,0,8,0" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+        <Style x:Key="SectionTitle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+
         <!-- bg.jpg is a <Resource> in the csproj: a missing pack resource fails at startup. -->
         <ImageBrush x:Key="BackdropBrush" ImageSource="pack://application:,,,/bg.jpg"
                     Stretch="UniformToFill" AlignmentX="Right" AlignmentY="Top" />
@@ -73,7 +110,7 @@
             <Setter Property="Background" Value="{StaticResource VoidBrush}" />
             <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
             <Setter Property="FontFamily" Value="Segoe UI" />
-            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontSize" Value="13" />
             <Setter Property="UseLayoutRounding" Value="True" />
             <Setter Property="TextOptions.TextFormattingMode" Value="Display" />
         </Style>
@@ -86,8 +123,8 @@
             <Setter Property="Background" Value="{StaticResource CardBrush}" />
             <Setter Property="BorderBrush" Value="{StaticResource CardLineBrush}" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="10" />
-            <Setter Property="Padding" Value="14,12,14,4" />
+            <Setter Property="CornerRadius" Value="12" />
+            <Setter Property="Padding" Value="16,12,16,6" />
             <Setter Property="Margin" Value="0,0,0,10" />
             <Setter Property="SnapsToDevicePixels" Value="True" />
         </Style>
@@ -257,18 +294,16 @@
 
         <!-- The disabled trigger is repeated last so it wins over this style's own colours. -->
         <Style x:Key="PrimaryButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
-            <Setter Property="Background" Value="{StaticResource MatchaBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource MatchaBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource MatchaInkBrush}" />
+            <Setter Property="Background" Value="{StaticResource MatchaGradientBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource MatchaGradientPressedBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource MatchaDeepInkBrush}" />
             <Setter Property="FontWeight" Value="SemiBold" />
             <Style.Triggers>
                 <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="{StaticResource MatchaHoverBrush}" />
-                    <Setter Property="BorderBrush" Value="{StaticResource MatchaHoverBrush}" />
+                    <Setter Property="Background" Value="{StaticResource MatchaGradientHoverBrush}" />
                 </Trigger>
                 <Trigger Property="IsPressed" Value="True">
-                    <Setter Property="Background" Value="{StaticResource MatchaPressedBrush}" />
-                    <Setter Property="BorderBrush" Value="{StaticResource MatchaPressedBrush}" />
+                    <Setter Property="Background" Value="{StaticResource MatchaGradientPressedBrush}" />
                 </Trigger>
                 <Trigger Property="IsEnabled" Value="False">
                     <Setter Property="Background" Value="{StaticResource DisabledBrush}" />

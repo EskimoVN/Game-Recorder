@@ -8,16 +8,23 @@
         <DockPanel>
             <Border DockPanel.Dock="Top" Background="{StaticResource HeaderBrush}"
                     BorderBrush="{StaticResource HairlineBrush}" BorderThickness="0,0,0,1" Padding="16,12">
-                <StackPanel Orientation="Horizontal">
-                    <!-- Decorative mark: three dango on a skewer in the theme colours. -->
-                    <Canvas Width="36" Height="10" Margin="0,0,10,0" VerticalAlignment="Center" IsHitTestVisible="False">
-                        <Rectangle Canvas.Top="4.5" Width="36" Height="1" Fill="{StaticResource InputLineBrush}" />
-                        <Ellipse Canvas.Left="0" Width="10" Height="10" Fill="{StaticResource AccentBrush}" />
-                        <Ellipse Canvas.Left="12" Width="10" Height="10" Fill="{StaticResource MochiBrush}" />
-                        <Ellipse Canvas.Left="24" Width="10" Height="10" Fill="{StaticResource MatchaBrush}" />
-                    </Canvas>
-                    <TextBlock VerticalAlignment="Center" FontSize="15"><Run Text="Odx" FontFamily="Bahnschrift SemiBold, Segoe UI Semibold" /><Run Text=" Capture" Foreground="{StaticResource TextSecondaryBrush}" /></TextBlock>
-                </StackPanel>
+                <DockPanel>
+                    <!-- The build's version (without the commit), so a screenshot tells which package a player runs. -->
+                    <Border DockPanel.Dock="Right" CornerRadius="10" Padding="9,2" BorderThickness="1" VerticalAlignment="Center"
+                            BorderBrush="{StaticResource HairlineBrush}">
+                        <TextBlock x:Name="VersionText" FontSize="11" Foreground="{StaticResource TextMutedBrush}" />
+                    </Border>
+                    <StackPanel Orientation="Horizontal">
+                        <!-- Decorative mark: three dango on a skewer in the theme colours. -->
+                        <Canvas Width="42" Height="12" Margin="0,0,12,0" VerticalAlignment="Center" IsHitTestVisible="False">
+                            <Rectangle Canvas.Top="5.5" Width="42" Height="1.5" Fill="#6B5A45" />
+                            <Ellipse Canvas.Left="0" Width="12" Height="12" Fill="{StaticResource SakuraBrush}" />
+                            <Ellipse Canvas.Left="13" Width="12" Height="12" Fill="{StaticResource ShiroBrush}" />
+                            <Ellipse Canvas.Left="26" Width="12" Height="12" Fill="{StaticResource MatchaSoftBrush}" />
+                        </Canvas>
+                        <TextBlock VerticalAlignment="Center" FontSize="16"><Run Text="Odx" FontFamily="Bahnschrift SemiBold, Segoe UI Semibold" /><Run Text=" Capture" Foreground="{StaticResource TextSecondaryBrush}" /></TextBlock>
+                    </StackPanel>
+                </DockPanel>
             </Border>
 
             <!-- Capture and Room cards share one label column width (SharedSizeGroup) so their fields line up. -->
@@ -33,6 +40,11 @@
                 </StackPanel.Resources>
 
                 <Border Style="{StaticResource Card}">
+                    <StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                        <Ellipse Style="{StaticResource SectionDot}" Fill="{StaticResource SakuraBrush}" />
+                        <TextBlock x:Name="SectionSourceText" Style="{StaticResource SectionTitle}" />
+                    </StackPanel>
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" SharedSizeGroup="FieldLabel" />
@@ -88,10 +100,16 @@
                         <Button x:Name="ObsTestButton" AutomationProperties.AutomationId="ObsTestButton" Grid.Row="5" Grid.Column="2"
                                 Click="ObsTest_Click" />
                     </Grid>
+                    </StackPanel>
                 </Border>
 
                 <!-- Room card: follows RoomPanel, which the code hides when odx-capture.json names no orchestrator. -->
                 <Border Style="{StaticResource Card}" Visibility="{Binding Visibility, ElementName=RoomPanel}">
+                    <StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                        <Ellipse Style="{StaticResource SectionDot}" Fill="{StaticResource ShiroBrush}" />
+                        <TextBlock x:Name="SectionRoomText" Style="{StaticResource SectionTitle}" />
+                    </StackPanel>
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" SharedSizeGroup="FieldLabel" />
@@ -142,9 +160,27 @@
                                 Grid.Column="1" HorizontalAlignment="Left" Margin="0,0,0,8" Visibility="Collapsed"
                                 Click="SyncClock_Click" />
                     </Grid>
+                    </StackPanel>
                 </Border>
 
                 <Border Style="{StaticResource Card}" Margin="0">
+                    <StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                        <!-- Matcha while idle, red while the recording timer runs. -->
+                        <Ellipse>
+                            <Ellipse.Style>
+                                <Style TargetType="Ellipse" BasedOn="{StaticResource SectionDot}">
+                                    <Setter Property="Fill" Value="{StaticResource MatchaSoftBrush}" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Visibility, ElementName=RecordTimerDot}" Value="Visible">
+                                            <Setter Property="Fill" Value="{StaticResource RecordBrush}" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Ellipse.Style>
+                        </Ellipse>
+                        <TextBlock x:Name="SectionRecordText" Style="{StaticResource SectionTitle}" />
+                    </StackPanel>
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
@@ -164,31 +200,31 @@
                                  GotKeyboardFocus="Hotkey_GotFocus" LostKeyboardFocus="Hotkey_LostFocus"
                                  PreviewKeyDown="Hotkey_PreviewKeyDown" />
 
-                        <!-- Turns red-outlined while the recording timer runs (its dot is shown), so the stop state reads at a glance. -->
+                        <!-- Turns solid red while the recording timer runs (its dot is shown), so the stop state reads at a glance. -->
                         <Button x:Name="StartStopButton" AutomationProperties.AutomationId="StartStopButton" Grid.Row="1"
-                                Grid.ColumnSpan="2" Margin="0,4,0,0" Padding="12,10" MinHeight="40" FontSize="14"
+                                Grid.ColumnSpan="2" Margin="0,4,0,0" Padding="12,12" MinHeight="46" FontSize="15"
                                 Click="StartStop_Click">
                             <Button.Style>
                                 <Style TargetType="Button" BasedOn="{StaticResource PrimaryButton}">
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding Visibility, ElementName=RecordTimerDot}" Value="Visible">
-                                            <Setter Property="Background" Value="{StaticResource RecordTintBrush}" />
-                                            <Setter Property="BorderBrush" Value="{StaticResource RecordBrush}" />
-                                            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+                                            <Setter Property="Background" Value="{StaticResource RecordSolidBrush}" />
+                                            <Setter Property="BorderBrush" Value="{StaticResource RecordSolidPressedBrush}" />
+                                            <Setter Property="Foreground" Value="White" />
                                         </DataTrigger>
                                         <MultiDataTrigger>
                                             <MultiDataTrigger.Conditions>
                                                 <Condition Binding="{Binding Visibility, ElementName=RecordTimerDot}" Value="Visible" />
                                                 <Condition Binding="{Binding IsMouseOver, RelativeSource={RelativeSource Self}}" Value="True" />
                                             </MultiDataTrigger.Conditions>
-                                            <Setter Property="Background" Value="{StaticResource RecordTintHoverBrush}" />
+                                            <Setter Property="Background" Value="{StaticResource RecordSolidHoverBrush}" />
                                         </MultiDataTrigger>
                                         <MultiDataTrigger>
                                             <MultiDataTrigger.Conditions>
                                                 <Condition Binding="{Binding Visibility, ElementName=RecordTimerDot}" Value="Visible" />
                                                 <Condition Binding="{Binding IsPressed, RelativeSource={RelativeSource Self}}" Value="True" />
                                             </MultiDataTrigger.Conditions>
-                                            <Setter Property="Background" Value="{StaticResource RecordTintPressedBrush}" />
+                                            <Setter Property="Background" Value="{StaticResource RecordSolidPressedBrush}" />
                                         </MultiDataTrigger>
                                         <Trigger Property="IsEnabled" Value="False">
                                             <Setter Property="Background" Value="{StaticResource DisabledBrush}" />
@@ -209,11 +245,18 @@
                             <TextBlock x:Name="RecordTimerText" AutomationProperties.AutomationId="RecordTimerText" Text="00:00:00"
                                        FontFamily="Consolas" FontSize="32" FontWeight="SemiBold"
                                        Foreground="{StaticResource TextMutedBrush}" TextOptions.TextFormattingMode="Ideal" />
+                            <!-- "REC" beside the time while it runs; follows the dot. -->
+                            <Border CornerRadius="10" Padding="9,2" Margin="14,0,0,0" BorderThickness="1" VerticalAlignment="Center"
+                                    Background="{StaticResource RecordChipBrush}" BorderBrush="{StaticResource RecordBrush}"
+                                    Visibility="{Binding Visibility, ElementName=RecordTimerDot}">
+                                <TextBlock Text="REC" FontSize="11" FontWeight="Bold" Foreground="White" />
+                            </Border>
                         </StackPanel>
 
                         <TextBlock x:Name="StatusText" AutomationProperties.AutomationId="StatusText" Grid.Row="3"
                                    Grid.ColumnSpan="2" TextWrapping="Wrap" Margin="0,4,0,8" />
                     </Grid>
+                    </StackPanel>
                 </Border>
             </StackPanel>
         </DockPanel>
