@@ -41,7 +41,7 @@ if [ -z "$id" ]; then
   fi
   ami=$(aws ssm get-parameter --query Parameter.Value --output text \
     --name /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id)
-  # The server build is about 20 GB.
+  # The server build is about 5 GB (content) + 160 MB (Linux binary); 60 GB leaves room for missions and logs.
   id=$(aws ec2 run-instances --image-id "$ami" --instance-type "$type" --key-name $name --security-group-ids "$sg" \
     --block-device-mappings 'DeviceName=/dev/sda1,Ebs={VolumeSize=60,VolumeType=gp3}' \
     --metadata-options HttpTokens=required \
@@ -67,7 +67,7 @@ if [ -n "$build" ]; then
   rsync -a --partial --exclude .DepotDownloader -e "ssh -i $key" "$build/" "ubuntu@$ip:/opt/arma3/server/"
   "${ssh_[@]}" 'chmod +x /opt/arma3/server/arma3server_x64'
 elif ! "${ssh_[@]}" test -f /opt/arma3/server/arma3server_x64; then
-  echo "Installing the current stable server with SteamCMD (about 20 GB)..."
+  echo "Installing the current stable server with SteamCMD (about 5 GB)..."
   "${ssh_[@]}" 'bash -s' << 'EOF1'
 set -euo pipefail
 sudo dpkg --add-architecture i386
