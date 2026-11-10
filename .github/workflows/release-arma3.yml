@@ -1,0 +1,41 @@
+name: Release Arma 3 launcher
+
+# Builds OdxArma3.exe (the odx_capture addon embedded) and attaches it to a GitHub release arma3-v<version>.
+# Start it by pushing a tag arma3-v0.1.0, or by hand (Actions -> Release Arma 3 launcher -> Run workflow).
+
+on:
+  push:
+    tags: ['arma3-v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Launcher version, e.g. 0.1.0
+        required: true
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Build
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          version="${INPUT_VERSION:-${GITHUB_REF_NAME#arma3-v}}"
+          dotnet build -c Release -p:Version="$version" research/arma3-camera-spike/launcher/OdxArma3
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "arma3-v$VERSION" research/arma3-camera-spike/launcher/OdxArma3/bin/Release/net48/OdxArma3.exe \
+            --target "$GITHUB_SHA" --latest=false --title "Odx Arma 3 $VERSION" \
+            --notes "Built from ${GITHUB_SHA::7}. Copy OdxArma3.exe anywhere on the player's PC and double-click (research/arma3-camera-spike/README.md)."

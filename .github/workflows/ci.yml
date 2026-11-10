@@ -51,3 +51,20 @@ jobs:
         with:
           name: OdxReforger
           path: research/reforger-camera-spike/launcher/OdxReforger/bin/Release/net48/OdxReforger.exe
+
+  arma3-launcher:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Build OdxArma3.exe
+        run: dotnet build -c Release research/arma3-camera-spike/launcher/OdxArma3
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OdxArma3
+          path: research/arma3-camera-spike/launcher/OdxArma3/bin/Release/net48/OdxArma3.exe

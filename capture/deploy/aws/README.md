@@ -25,9 +25,11 @@ restarts the systemd unit `reforger`.
 
 `[ARMA3_INSTANCE_TYPE=m6a.large] bash create-arma3.sh [server build folder]` creates `arma3-server` (m6a.large: 2 vCPU,
 8 GB, ~20 players; 60 GB, Elastic IP, SSH key `~/.ssh/arma3-server.pem`, UDP 2302–2305 open): the Arma 3 dedicated server
-with BattlEye off (`arma3/server.cfg`), the Custom difficulty with the HUD off (`arma3/odx.Arma3Profile`) and the test mission
-`arma3/mission/odx_test.stratis` (24 playable riflemen on Stratis, respawn at `respawn_west`), packed on the machine by
-`arma3/pack_pbo.py`. Without a build folder the machine installs the current stable server itself with SteamCMD (app 233780,
+with BattlEye off and addon signatures unchecked (`arma3/server.cfg`: the odx_capture client addon of OdxArma3.exe is
+unsigned), the Custom difficulty with the HUD off (`arma3/odx.Arma3Profile`) and the test mission
+`arma3/mission/odx_test.stratis` (64 playable riflemen on Stratis in 16 groups of 4 slots; at mission start the server
+picks 16 land positions at least 400 m apart with `BIS_fnc_findSafePos`, logged as `ODXSPAWN` lines, and each group starts
+and respawns at its own), packed on the machine by `arma3/pack_pbo.py`. Without a build folder the machine installs the current stable server itself with SteamCMD (app 233780,
 anonymous login), the version the players' Steam clients are on; a build folder pins a version instead (content depot 233781 +
 Linux depot 233783, manifests in `document/games/arma3.md`, downloaded on a PC with DepotDownloader and uploaded by the
 script). Each run replaces the config, profile and mission with HEAD's and restarts the systemd unit `arma3`. Players join by

@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- .NET Framework 4.8 ships with Windows 10 1903+ and 11: the exe (~40 KB plus the addon) runs without installing a
+       runtime. Builds on any OS with the .NET SDK: dotnet build -c Release -->
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <OutputType>WinExe</OutputType>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <AssemblyName>OdxArma3</AssemblyName>
+    <RootNamespace>OdxArma3</RootNamespace>
+    <!-- Release builds get the tag's version (release-arma3.yml); the window title shows it. -->
+    <Version>0.0.0-dev</Version>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="Microsoft.CSharp" />
+    <!-- The addon's source goes into the exe; Launch packs it into @OdxCapture\addons\odx_capture.pbo. -->
+    <EmbeddedResource Include="..\..\..\..\capture\native\arma3-mod\odx_capture\**\*" LogicalName="addon/%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+</Project>

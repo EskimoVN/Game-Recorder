@@ -10,5 +10,22 @@ class Header
 {
 	gameType = Coop;
 	minPlayers = 1;
-	maxPlayers = 24;
+	maxPlayers = 64;
+};
+
+class CfgFunctions
+{
+	class ODX
+	{
+		class Mission
+		{
+			class placeAtSpawn
+			{
+				// The player onto its group's spawn point: slot odx_NN → point floor((NN - 1) / 4), 10 m of scatter.
+				code = "private _slot = parseNumber ((vehicleVarName player) select [4]); \
+					private _k = (floor ((_slot - 1) / 4)) min (count ODX_spawns - 1) max 0; \
+					player setPos ((ODX_spawns # _k) vectorAdd [random 10 - 5, random 10 - 5, 0]);";
+			};
+		};
+	};
 };

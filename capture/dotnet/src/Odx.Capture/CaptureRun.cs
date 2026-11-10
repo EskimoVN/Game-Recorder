@@ -95,6 +95,8 @@ public sealed class CaptureRun : ICaptureRun
     /// <summary>The round's session id when the agent runs this capture (its DirName); null for a capture outside a room.</summary>
     private readonly string? _sessionId;
     private readonly string? _reforgerDir;
+    /// <summary>The folder OdxArma3.exe starts the game with (its .rpt holds the camera log); null unless the profile's camera_source is arma3-mod.</summary>
+    private readonly string? _arma3ProfileDir;
     private readonly double? _roundStartUtcMs, _originRttMs;
     private readonly string? _gridOrigin;
     private double _roundEndUtcMs = double.NaN;
@@ -125,6 +127,7 @@ public sealed class CaptureRun : ICaptureRun
         _fps = options.Fps;
         Directory.CreateDirectory(SessionDir);
         var profile = TryLoadProfile(options.GameProfile);
+        if (profile?.CameraSource == Arma3Camera.Source) _arma3ProfileDir = Arma3Camera.ProfileDir();
         if (profile?.CameraSource == ReforgerCamera.Source)
         {
             _reforgerDir = ReforgerCamera.OdxDir();
@@ -343,6 +346,8 @@ public sealed class CaptureRun : ICaptureRun
         if (_reforgerDir is not null &&
             ReforgerCamera.Collect(_reforgerDir, Path.GetFileName(SessionDir), SessionDir, TimeSpan.FromSeconds(3)) is { } warning)
             lock (_stderr) _stderr.Add(warning);
+        if (_arma3ProfileDir is not null && Arma3Camera.Collect(_arma3ProfileDir, SessionDir, TimeSpan.FromSeconds(3)) is { } arma3Warning)
+            lock (_stderr) _stderr.Add(arma3Warning);
         List<string> errors;
         lock (_stderr) errors = [.. _stderr];
         SetPhase(CapturePhase.Building, 100);

@@ -1,0 +1,10 @@
+/Users/phongvu/Documents/Game-Recorder/research/arma3-camera-spike/launcher/OdxArma3/bin/Release/net48/OdxArma3.exe.config
+/Users/phongvu/Documents/Game-Recorder/research/arma3-camera-spike/launcher/OdxArma3/bin/Release/net48/OdxArma3.exe
+/Users/phongvu/Documents/Game-Recorder/research/arma3-camera-spike/launcher/OdxArma3/bin/Release/net48/OdxArma3.pdb
+/Users/phongvu/Documents/Game-Recorder/research/arma3-camera-spike/launcher/OdxArma3/obj/Release/net48/OdxArma3.GeneratedMSBuildEditorConfig.editorconfig
+/Users/phongvu/Documents/Game-Recorder/research/arma3-camera-spike/launcher/OdxArma3/obj/Release/net48/OdxArma3.AssemblyInfoInputs.cache
+/Users/phongvu/Documents/Game-Recorder/research/arma3-camera-spike/launcher/OdxArma3/obj/Release/net48/OdxArma3.AssemblyInfo.cs
+/Users/phongvu/Documents/Game-Recorder/research/arma3-camera-spike/launcher/OdxArma3/obj/Release/net48/OdxArma3.csproj.CoreCompileInputs.cache
+/Users/phongvu/Documents/Game-Recorder/research/arma3-camera-spike/launcher/OdxArma3/obj/Release/net48/OdxArma3.sourcelink.json
+/Users/phongvu/Documents/Game-Recorder/research/arma3-camera-spike/launcher/OdxArma3/obj/Release/net48/OdxArma3.exe
+/Users/phongvu/Documents/Game-Recorder/research/arma3-camera-spike/launcher/OdxArma3/obj/Release/net48/OdxArma3.pdb

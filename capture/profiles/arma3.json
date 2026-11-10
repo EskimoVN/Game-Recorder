@@ -9,6 +9,7 @@
   },
   "localization": "en-US",
   "window_process": "arma3_x64",
+  "camera_source": "arma3-mod",
   "network": {
     "protocol": "raw",
     "ports": [
