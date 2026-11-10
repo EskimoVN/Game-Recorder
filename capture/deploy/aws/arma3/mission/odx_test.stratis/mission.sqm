@@ -73,7 +73,7 @@ class Mission
 			side="West";
 			class Entities
 			{
-				items=16;
+				items=24;
 				class Item0
 				{
 					dataType="Object";
@@ -330,6 +330,134 @@ class Mission
 					id=16;
 					type="B_Soldier_F";
 				};
+				class Item16
+				{
+					dataType="Object";
+					class PositionInfo
+					{
+						position[]={2000,6,5654};
+					};
+					side="West";
+					flags=4;
+					class Attributes
+					{
+						isPlayable=1;
+					};
+					id=17;
+					type="B_Soldier_F";
+				};
+				class Item17
+				{
+					dataType="Object";
+					class PositionInfo
+					{
+						position[]={2002,6,5654};
+					};
+					side="West";
+					flags=4;
+					class Attributes
+					{
+						isPlayable=1;
+					};
+					id=18;
+					type="B_Soldier_F";
+				};
+				class Item18
+				{
+					dataType="Object";
+					class PositionInfo
+					{
+						position[]={2004,6,5654};
+					};
+					side="West";
+					flags=4;
+					class Attributes
+					{
+						isPlayable=1;
+					};
+					id=19;
+					type="B_Soldier_F";
+				};
+				class Item19
+				{
+					dataType="Object";
+					class PositionInfo
+					{
+						position[]={2006,6,5654};
+					};
+					side="West";
+					flags=4;
+					class Attributes
+					{
+						isPlayable=1;
+					};
+					id=20;
+					type="B_Soldier_F";
+				};
+				class Item20
+				{
+					dataType="Object";
+					class PositionInfo
+					{
+						position[]={2008,6,5654};
+					};
+					side="West";
+					flags=4;
+					class Attributes
+					{
+						isPlayable=1;
+					};
+					id=21;
+					type="B_Soldier_F";
+				};
+				class Item21
+				{
+					dataType="Object";
+					class PositionInfo
+					{
+						position[]={2010,6,5654};
+					};
+					side="West";
+					flags=4;
+					class Attributes
+					{
+						isPlayable=1;
+					};
+					id=22;
+					type="B_Soldier_F";
+				};
+				class Item22
+				{
+					dataType="Object";
+					class PositionInfo
+					{
+						position[]={2012,6,5654};
+					};
+					side="West";
+					flags=4;
+					class Attributes
+					{
+						isPlayable=1;
+					};
+					id=23;
+					type="B_Soldier_F";
+				};
+				class Item23
+				{
+					dataType="Object";
+					class PositionInfo
+					{
+						position[]={2014,6,5654};
+					};
+					side="West";
+					flags=4;
+					class Attributes
+					{
+						isPlayable=1;
+					};
+					id=24;
+					type="B_Soldier_F";
+				};
 			};
 			class Attributes
 			{
@@ -342,7 +470,7 @@ class Mission
 			position[]={2000,0,5640};
 			name="respawn_west";
 			type="Empty";
-			id=17;
+			id=25;
 		};
 	};
 };

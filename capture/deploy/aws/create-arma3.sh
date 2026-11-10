@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Creates arma3-server on an EC2 machine (Ubuntu 24.04) and runs the Arma 3 dedicated server (BattlEye off, document/games/arma3.md §5);
 # run it again to update the server config, difficulty profile and test mission to this repository's HEAD (uncommitted changes are not sent):
-#   bash create-arma3.sh [server build folder]
-# Server build folder: the pinned Linux build of Steam app 233780 (content depot 233781 + Linux binary depot 233783 merged,
-# document/games/arma3.md "Pinned server builds"), downloaded on a PC with DepotDownloader (a Steam account is needed, anonymous
-# login is refused for this app) because Steam refuses logins from AWS addresses. Needed on the first run; later runs send it
-# only when given (rsync, so only changed files).
+#   [ARMA3_INSTANCE_TYPE=m6a.large] bash create-arma3.sh [server build folder]
+# Without a server build folder, the machine installs the current stable server itself with SteamCMD (app 233780, anonymous
+# login) when it has none yet: the players' Steam clients are on that same version. A server build folder pins a version
+# instead: the Linux build of app 233780 (content depot 233781 + Linux binary depot 233783 merged, document/games/arma3.md
+# "Pinned server builds"), downloaded on a PC with DepotDownloader and sent with rsync (only changed files on later runs).
+# m6a.large (2 vCPU, 8 GB, ~0.10 $/h in Singapore) carries ~20 players: the server is one main thread plus a little.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(git -C "$here" rev-parse --show-toplevel)
@@ -18,6 +19,7 @@ name=arma3-server
 key=$HOME/.ssh/$name.pem
 my_ip=$(curl -fsS https://checkip.amazonaws.com)
 [ -z "$build" ] || [ -f "$build/arma3server_x64" ] || { echo "$build/arma3server_x64 missing."; exit 1; }
+type=${ARMA3_INSTANCE_TYPE:-m6a.large}
 
 sg=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=$name" --query 'SecurityGroups[0].GroupId' --output text)
 if [ "$sg" = None ]; then
@@ -33,7 +35,6 @@ aws ec2 authorize-security-group-ingress --group-id "$sg" --protocol tcp --port 
 id=$(aws ec2 describe-instances --output text --query 'Reservations[].Instances[].InstanceId' \
   --filters "Name=tag:Name,Values=$name" Name=instance-state-name,Values=pending,running,stopping,stopped)
 if [ -z "$id" ]; then
-  [ -n "$build" ] || { echo "First run: give the server build folder."; exit 2; }
   if [ ! -f "$key" ]; then
     aws ec2 create-key-pair --key-name $name --key-type ed25519 --query KeyMaterial --output text > "$key"
     chmod 600 "$key"
@@ -41,7 +42,7 @@ if [ -z "$id" ]; then
   ami=$(aws ssm get-parameter --query Parameter.Value --output text \
     --name /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id)
   # The server build is about 20 GB.
-  id=$(aws ec2 run-instances --image-id "$ami" --instance-type t3.xlarge --key-name $name --security-group-ids "$sg" \
+  id=$(aws ec2 run-instances --image-id "$ami" --instance-type "$type" --key-name $name --security-group-ids "$sg" \
     --block-device-mappings 'DeviceName=/dev/sda1,Ebs={VolumeSize=60,VolumeType=gp3}' \
     --metadata-options HttpTokens=required \
     --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$name}]" \
@@ -65,6 +66,20 @@ until "${ssh_[@]}" true 2> /dev/null; do sleep 5; done
 if [ -n "$build" ]; then
   rsync -a --partial --exclude .DepotDownloader -e "ssh -i $key" "$build/" "ubuntu@$ip:/opt/arma3/server/"
   "${ssh_[@]}" 'chmod +x /opt/arma3/server/arma3server_x64'
+elif ! "${ssh_[@]}" test -f /opt/arma3/server/arma3server_x64; then
+  echo "Installing the current stable server with SteamCMD (about 20 GB)..."
+  "${ssh_[@]}" 'bash -s' << 'EOF1'
+set -euo pipefail
+sudo dpkg --add-architecture i386
+sudo apt-get update -qq
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq lib32gcc-s1 lib32stdc++6 libcurl4 curl > /dev/null
+mkdir -p ~/steamcmd
+curl -fsSL https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz | tar -xz -C ~/steamcmd
+# SteamCMD exits 0 even when the login or the download failed: the binary's presence is the check.
+~/steamcmd/steamcmd.sh +force_install_dir /opt/arma3/server +login anonymous +app_update 233780 validate +quit | tail -5
+test -f /opt/arma3/server/arma3server_x64 || { echo "SteamCMD did not install the server (anonymous login or download refused from this address)."; exit 3; }
+chmod +x /opt/arma3/server/arma3server_x64
+EOF1
 fi
 # The Linux server matches file names case-sensitively: the mission folder, its .pbo and the template in server.cfg are all
 # lowercase. The difficulty profile is <-profiles dir>/<-name>.Arma3Profile.
