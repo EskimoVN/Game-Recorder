@@ -5,7 +5,7 @@ leave it out and use your own AWS CLI setup (`AWS_PROFILE`). Region: `ap-southea
 
 | Script | Does |
 |---|---|
-| `bash power.sh <name> start\|stop\|status` | Starts or stops `reforger-server`, `arma3-server` or `odx-orchestrator` and prints its IP. Stopped: only the disk and the Elastic IP are billed. |
+| `bash power.sh <name> start\|stop\|status` | Starts or stops `reforger-server`, `reforger-server-small`, `arma3-server` or `odx-orchestrator` and prints its IP. Stopped: only the disk and the Elastic IP are billed. |
 | `[ODX_DOMAIN=<domain>] bash create-orchestrator.sh [profile]` | Creates `odx-orchestrator` (t3.medium, Docker, Elastic IP, SSH key `~/.ssh/odx-orchestrator.pem`) and runs `deploy/up.sh` on it. Domain: `ODX_DOMAIN` (its A record must already point at the Elastic IP; the script checks), else `<IP with dashes>.sslip.io` on the first run; later runs keep the machine's domain unless `ODX_DOMAIN` is given. Run it again to deploy the repository's HEAD; `.env` (access key), `state/` and `zerotier/` are kept. `profile` sets `ODX_GAME_PROFILE`, e.g. `arma-reforger.json`. |
 
 It prints the orchestrator's address and access key. Put them in the repository's GitHub settings (variable
@@ -13,7 +13,10 @@ It prints the orchestrator's address and access key. Put them in the repository'
 players' package for it (tag `capture-v<version>` or Run workflow) and attaches the zip to a release. With a domain of our
 own the package stays valid when the machine is replaced.
 
-`bash create-reforger.sh [server build folder]` creates `reforger-server` (t3.xlarge, 60 GB, Elastic IP, SSH key
+Two game servers run since 2026-11-09, cloned from the first one's AMI: `reforger-server` (c7a.xlarge, 4 cores at 3.7 GHz
+for 100+ players: the engine's main thread is the limit, ~0.75 of a t3 core at 52 players, and the t3.xlarge it replaced
+hung and crashed at 87) and `reforger-server-small` (m6a.large, up to ~40 players). The old `reforger-server-old`
+(t3.xlarge) is stopped. `bash create-reforger.sh [server build folder]` creates `reforger-server` (t3.xlarge, 60 GB, Elastic IP, SSH key
 `~/.ssh/reforger-server.pem`, UDP 2001 open): the Arma Reforger 1.6.0.68 command-line server, `-client <IP>:2001`. The
 build (data depot + Linux depot, manifests in `document/games/arma-reforger.md`) is downloaded on a PC with DepotDownloader,
 because Steam refuses logins from AWS addresses, and uploaded by the script; the first run needs it. Each run replaces the

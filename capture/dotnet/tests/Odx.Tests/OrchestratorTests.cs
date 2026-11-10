@@ -330,6 +330,99 @@ public sealed class OrchestratorTests : IAsyncLifetime
         }
     }
 
+    /// <summary>
+    /// A stop that gave up its last frames on one machine (CaptureReport.TailFrames: the frame before stood in until
+    /// round_end there) keeps the round, and odx merge ends every stream where all players still captured (decided 2026-11-09).
+    /// </summary>
+    [SkippableFact]
+    public async Task AGivenUpLastFrameEndsEveryStreamWhereAllPlayersStillCaptured()
+    {
+        Skip.IfNot(SessionFixtures.HasFfmpeg, "needs ffmpeg + ffprobe");
+        string template = SessionFixtures.MakeValidSession(Path.Combine(_root, "template"));
+        File.WriteAllText(Path.Combine(template, SessionBuilder.KeyBindingsFile), "{}");
+        const string note = "the GPU did not hand over the last frame within 2 s";
+        const int tail = 10;
+        FakeCapture.Reports["lag"] = new CaptureReport(SessionFixtures.NFrames, null, SessionFixtures.Fps, tail, 0, 0, true, "process",
+            CaptureReport.Aligned, 0, null, null, note, tail);
+        var finished = new TaskCompletionSource<RoundRecord>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var started = ConnectAgents(template, "lag", "fine");
+        _agents.Last().RoundFinished += r => finished.TrySetResult(r);
+        await WaitForAgents(2);
+        var session = NextSession();
+
+        await Post(new { type = "match_start", match_id = "m5" });
+        await Post(new { type = "round_start", countdown_ms = 1000 });
+        await Task.WhenAll(started.Select(s => s.Task)).WaitAsync(TimeSpan.FromSeconds(10));
+        await Task.Delay(1500);  // the fake's 2 s of frames run to ~1 s past play start: ~0.5 s of play, the cut 10 frames before its end
+        await Post(new { type = "round_end" });
+        var (dir, report) = await session;
+        var record = await finished.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Nobody records again: the room sees a degraded player, not a failed one.
+        var lag = record.Players.Single(p => p.PlayerId == "lag");
+        Assert.Equal(CaptureReport.Degraded, lag.Verdict);
+        Assert.Equal([$"stop: {note}; the last {tail} frame(s) show the frame before (cut from every player at merge)"], lag.Problems);
+        Assert.Equal(CaptureReport.Ok, record.Players.Single(p => p.PlayerId == "fine").Verdict);
+        Assert.True(report.Pass, string.Join("; ", report.Players.SelectMany(p => p.Issues).Select(i => i.Message)));
+
+        var sessionJson = JsonNode.Parse(File.ReadAllText(Path.Combine(dir, "session.json")))!;
+        double frameMs = 1000.0 / SessionFixtures.Fps, cutMs = (double)sessionJson["end_cut"]!["ms"]!;
+        Assert.InRange(cutMs, (tail - 0.5) * frameMs, (tail + 1.5) * frameMs);
+        Assert.Equal(["lag"], sessionJson["end_cut"]!["players"]!.AsArray().Select(p => (string?)p));
+        Assert.Equal(UtcText.Iso(record.EndUtcMs!.Value), (string?)sessionJson["end_cut"]!["game_round_end_utc"]);
+        Assert.Equal(record.EndUtcMs.Value - cutMs - record.StartUtcMs, (double)sessionJson["duration_ms"]!, 0.5);
+        double cutUtc = record.EndUtcMs.Value - cutMs;
+        var lastFrame = new Dictionary<string, double>();
+        foreach (string p in new[] { "lag", "fine" })
+        {
+            var player = JsonNode.Parse(File.ReadAllText(Path.Combine(dir, "players", p, "player.json")))!;
+            Assert.True((int)player["end_cut_frames"]! > 0);
+            Assert.Contains(player["qa"]!["checks"]!.AsArray(), c => (string?)c!["id"] == "sync.end" && (bool)c["pass"]!);
+            var (_, frames) = FramesBin.Read(Path.Combine(dir, "players", p, FramesBin.FileName));
+            Assert.Equal(Mp4Reader.Read(Path.Combine(dir, "players", p, "video.mp4")).Frames, frames.Count);
+            Assert.Equal(frames.Count, File.ReadLines(Path.Combine(dir, "players", p, "frames.csv")).Count() - 1);
+            lastFrame[p] = frames[^1].ServerTimeUs / 1000.0;
+            // The last frame is the one before the cut, on every machine.
+            Assert.InRange(cutUtc - lastFrame[p], 0, 2 * frameMs);
+        }
+        Assert.InRange(Math.Abs(lastFrame["lag"] - lastFrame["fine"]), 0, frameMs);
+    }
+
+    /// <summary>A failed stream (a stop that gave up more than 3 s) is not delivered as valid, so its tail must not shorten the others.</summary>
+    [SkippableFact]
+    public async Task AFailedPlayersTailDoesNotCutTheOthers()
+    {
+        Skip.IfNot(SessionFixtures.HasFfmpeg, "needs ffmpeg + ffprobe");
+        string template = SessionFixtures.MakeValidSession(Path.Combine(_root, "template"));
+        File.WriteAllText(Path.Combine(template, SessionBuilder.KeyBindingsFile), "{}");
+        const string note = "the capture callback did not let go within 2 s (in 'convert')";
+        long tail = (long)(CaptureReport.MaxTailSeconds * SessionFixtures.Fps) + 1;
+        FakeCapture.Reports["bad"] = new CaptureReport(SessionFixtures.NFrames, null, SessionFixtures.Fps, tail, 0, 0, true, "process",
+            CaptureReport.Aligned, 0, null, null, note, tail);
+        var finished = new TaskCompletionSource<RoundRecord>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var started = ConnectAgents(template, "bad", "fine");
+        _agents.Last().RoundFinished += r => finished.TrySetResult(r);
+        await WaitForAgents(2);
+        var session = NextSession();
+
+        await Post(new { type = "match_start", match_id = "m6" });
+        await Post(new { type = "round_start", countdown_ms = 1000 });
+        await Task.WhenAll(started.Select(s => s.Task)).WaitAsync(TimeSpan.FromSeconds(10));
+        await Task.Delay(1500);
+        await Post(new { type = "round_end" });
+        var (dir, report) = await session;
+        var record = await finished.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Equal(CaptureReport.Failed, record.Players.Single(p => p.PlayerId == "bad").Verdict);
+        Assert.Equal(CaptureReport.Ok, record.Players.Single(p => p.PlayerId == "fine").Verdict);
+        var sessionJson = JsonNode.Parse(File.ReadAllText(Path.Combine(dir, "session.json")))!;
+        Assert.Null(sessionJson["end_cut"]);
+        Assert.Equal(record.EndUtcMs!.Value - record.StartUtcMs, (double)sessionJson["duration_ms"]!, 0.5);
+        var fine = JsonNode.Parse(File.ReadAllText(Path.Combine(dir, "players", "fine", "player.json")))!;
+        Assert.Equal(0, (int)fine["end_cut_frames"]!);
+        Assert.Contains(report.Players, p => p.PlayerId == "fine" && p.Pass);
+    }
+
     [SkippableFact]
     public async Task PlayersOwnCopiesOfTheRoundFilesMergeToTheSameSession()
     {

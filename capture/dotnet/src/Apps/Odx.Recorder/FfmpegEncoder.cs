@@ -45,14 +45,16 @@ internal sealed class FfmpegEncoder : IDisposable
 
     /// <summary>
     /// Ends the input and waits for ffmpeg to finish the file. -1 when it has not exited within <paramref name="wait"/>
-    /// (a hardware encoder that never drains): it is killed, and the file keeps the fragments written before.
+    /// (a hardware encoder that never drains): it is killed, and the file keeps the fragments written before. A kill
+    /// is not waited for past 5 s either: a process inside a driver call dies only when that returns (one 0.2.8 stop of
+    /// 2026-11-09 hung here).
     /// </summary>
     public int Finish(TimeSpan wait)
     {
         EndVideo();
         if (_proc.WaitForExit(wait)) return _proc.ExitCode;
         _proc.Kill();
-        _proc.WaitForExit();
+        _proc.WaitForExit(TimeSpan.FromSeconds(5));
         return -1;
     }
 

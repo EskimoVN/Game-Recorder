@@ -91,15 +91,23 @@ internal sealed class FrameWriter
                 {
                     _encoder.Write(frame ?? _black);
                 }
-                catch (IOException e)
+                catch (Exception e) when (e is IOException or ObjectDisposedException)
                 {
+                    // ObjectDisposedException: the stop closed the pipe under a write ffmpeg was not taking.
                     _error = $"ffmpeg pipe closed: {e.Message}";
                     break;
                 }
                 long ms = (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds;
                 Interlocked.Add(ref _writeMs, ms);
                 if (ms > Interlocked.Read(ref _writeMaxMs)) Interlocked.Exchange(ref _writeMaxMs, ms);
-                _log.Write(t);
+                try
+                {
+                    _log.Write(t);
+                }
+                catch (ObjectDisposedException)
+                {
+                    return;   // the stop gave the drain up and has closed the log: nothing of this write is wanted any more
+                }
                 Interlocked.Increment(ref _written);
             }
             if (frame is not null) _free.Add(frame);

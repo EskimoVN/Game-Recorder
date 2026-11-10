@@ -19,12 +19,19 @@ public class CaptureReportTests
     }
 
     [Fact]
-    public void A_given_up_last_frame_fails_the_round_whatever_the_frames()
+    public void A_given_up_last_frame_keeps_the_round_degraded_up_to_3_s_of_stand_in_frames()
     {
         const string note = "the capture callback did not let go within 2 s (in 'readback')";
         var r = Report(stopNote: note, tail: 1);
-        Assert.Equal(CaptureReport.Failed, r.Verdict);
-        Assert.Equal([$"stop: {note}; the last 1 frame(s) show the frame before"], r.Problems());
+        Assert.Equal(CaptureReport.Degraded, r.Verdict);
+        Assert.Equal([$"stop: {note}; the last 1 frame(s) show the frame before (cut from every player at merge)"], r.Problems());
+        Assert.Equal(CaptureReport.Degraded, Report(stopNote: note, tail: 90).Verdict);
+        var afterRoundEnd = Report(stopNote: note, tail: 0);
+        Assert.Equal(CaptureReport.Ok, afterRoundEnd.Verdict);
+        Assert.Empty(afterRoundEnd.Problems());
+        var over = Report(stopNote: note, tail: 91);
+        Assert.Equal(CaptureReport.Failed, over.Verdict);
+        Assert.Equal([$"stop: {note}; the last 91 frame(s) show the frame before (over 3 s)"], over.Problems());
     }
 
     [Fact]

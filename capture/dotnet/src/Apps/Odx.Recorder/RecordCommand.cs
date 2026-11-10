@@ -53,8 +53,8 @@ public static class RecordCommand
     private static readonly TimeSpan LastFrameWait = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan DrainTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan FfmpegExitTimeout = TimeSpan.FromSeconds(20);
-    /// <summary>After the stop signal: past the limits above, a step that never returns ends the process (see the watchdog).</summary>
-    private static readonly TimeSpan StopWatchdog = TimeSpan.FromSeconds(45);
+    /// <summary>After the stop signal: past the limits above (~47 s in all), a step that never returns ends the process (see the watchdog).</summary>
+    private static readonly TimeSpan StopWatchdog = TimeSpan.FromSeconds(55);
 
     public static int Run(string[] args)
     {
@@ -212,6 +212,7 @@ public static class RecordCommand
         long sourceFrames = 0, starvedFrames = 0, readbackMs = 0, readbackMaxMs = 0;
         string[] captureStep = ["idle"];   // what the capture callback is in, for a stop that waits on it
         double givenUpT = double.NegativeInfinity;   // capture time of the frame the stop gave up
+        bool readbackAbandoned = false;   // the stop's Map never returned: its thread and buffer are left, D3D is not touched again
         // False when the GPU did not hand the frame over within readWait (the stop's bounded read).
         bool ShowPending(TimeSpan? readWait = null)
         {
@@ -226,12 +227,28 @@ public static class RecordCommand
                 return true;
             }
             long started = Stopwatch.GetTimestamp();
-            bool read = converter!.Read(p.Staging, incoming, readWait);
+            bool read;
+            if (readWait is { } wait)
+            {
+                // The stop's readback, on its own thread: on 2026-11-09 (7 stops, 0.3.1) the Map itself never returned,
+                // DoNotWait or not, with the callback idle; the frame is given up and that thread left where it is.
+                var readback = Task.Run(() => converter!.Read(p.Staging, incoming, wait));
+                try
+                {
+                    read = readback.Wait(wait + TimeSpan.FromSeconds(1)) && readback.Result;
+                }
+                catch (AggregateException)
+                {
+                    read = false;
+                }
+                if (!readback.IsCompleted) readbackAbandoned = true;
+            }
+            else read = converter!.Read(p.Staging, incoming);
             long ms = (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds;
             readbackMs += ms;
             readbackMaxMs = Math.Max(readbackMaxMs, ms);
             if (read) Emit(resampler.Advance(p.T), incoming);
-            else writer.Submit(incoming, []);   // back to the pool unused
+            else if (!readbackAbandoned) writer.Submit(incoming, []);   // back to the pool unused
             return read;
         }
 
@@ -403,7 +420,8 @@ public static class RecordCommand
                 Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
             }));
 
-        // Watchdog: the limits below add up to ~41 s, but a Windows call on the stop path can simply never return (WGC,
+        // Watchdog: the limits below add up to ~47 s (gate 2, readback 3, drain 10, audio 7, ffmpeg 20 + 5 after a kill),
+        // but a Windows call on the stop path can simply never return (WGC,
         // D3D or WASAPI teardown on the host PCs of 2026-11-06/07; which one, this names). Then the recording is ended
         // with what is on disk: recording.json and the stopped status say where it stuck, this process exits, ffmpeg
         // (a child with its own stdin pipe) sees the end of its input and finishes video_raw.mp4, and the capture host
@@ -515,9 +533,10 @@ public static class RecordCommand
         encoder.Dispose();
         Step("audio dispose");
         audio?.Dispose();
-        if (locked)
+        if (locked && !readbackAbandoned)
         {
-            // A callback that never let go may still be inside WGC or D3D: these are left to the process exit then.
+            // A callback that never let go, or a readback that never returned, may still be inside WGC or D3D: these are
+            // left to the process exit then.
             Step("capture session");
             session.Dispose();
             Step("frame pool");
