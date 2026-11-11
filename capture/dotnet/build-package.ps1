@@ -110,12 +110,14 @@ function New-Zip([string]$path, [IO.FileInfo[]]$files, [string]$from, [string]$p
 $packageZip = Join-Path $dist "$name.zip"
 New-Zip $packageZip (@(Get-Item $launcherExe) + @(Get-ChildItem $bin -Recurse -File)) $out "$name/" @('data/captures/', 'data/delivery/')
 
-# The update: unzipped over an installed package, it replaces the rebuilt executables and nothing else.
+# The update: unzipped over an installed package, it replaces the rebuilt executables and the base package's game
+# profiles (a new game's profile, e.g. Arma 3's camera_source, reaches PCs that only take updates).
 $updateDir = Join-Path $work 'update'
 New-Item -ItemType Directory -Force (Join-Path $updateDir 'bin') | Out-Null
 foreach ($exe in $rebuilt) { Copy-Item (Join-Path $bin $exe) (Join-Path $updateDir "bin\$exe") }
 if ($launcherBuilt) { Copy-Item $launcherExe (Join-Path $updateDir 'Odx Capture.exe') }
-$replaced = if ($launcherBuilt) { 'Odx Capture.exe, bin\odx-app.exe va bin\odx.exe' } else { 'bin\odx-app.exe va bin\odx.exe' }
+Copy-Item (Join-Path $bin 'games') (Join-Path $updateDir 'bin\games') -Recurse
+$replaced = if ($launcherBuilt) { 'Odx Capture.exe, bin\odx-app.exe, bin\odx.exe va bin\games' } else { 'bin\odx-app.exe, bin\odx.exe va bin\games' }
 $readme = @"
 CAP NHAT ODX CAPTURE LEN $Version
 
