@@ -5,6 +5,7 @@
 #include <fstream>
 #include <sstream>
 
+#include "odx/arma3_log.hpp"
 #include "odx/config.hpp"
 #include "odx/fake_game.hpp"
 #include "odx/memory.hpp"
@@ -102,6 +103,42 @@ TEST_CASE("recorder output matches the camera_samples.csv fixture read by odx bu
     CHECK(meta.find("\"convention\": \"unreal\"") != std::string::npos);
     CHECK(meta.find("\"units_to_world\": 0.01") != std::string::npos);
     CHECK(meta.find("\"fov_axis\": \"horizontal\"") != std::string::npos);
+}
+
+TEST_CASE("Arma 3 log follows control.txt and matches the arma3_camera.csv fixture read by odx build") {
+    auto dir = std::filesystem::temp_directory_path() / "odx_arma3_test";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    auto control = dir / "control.txt", out = dir / "arma3_camera.csv";
+    Arma3Log log(control);
+    log.poll();
+    CHECK_FALSE(log.recording());
+
+    std::ofstream(control) << out.string() << "\n";
+    log.poll();
+    REQUIRE(log.recording());
+    std::string fixture = read_file(std::string(ODX_FIXTURES_DIR) + "/arma3_camera.csv");
+    std::istringstream rows(fixture);
+    std::string row;
+    std::getline(rows, row);
+    while (std::getline(rows, row) && row != kArma3EndLine) {
+        auto comma = row.find(',');
+        std::string payload = row.substr(comma + 1);
+        REQUIRE(arma3_frame_ok(payload));
+        log.write(std::stod(row.substr(0, comma)), payload);
+    }
+    log.poll();
+    std::filesystem::remove(control);
+    log.poll();
+    CHECK_FALSE(log.recording());
+    CHECK(read_file(out) == fixture);
+}
+
+TEST_CASE("Arma 3 frame payloads need 15 fields on one line") {
+    CHECK(arma3_frame_ok("INTERNAL,1,2,3,1,0,0,0,0,1,0,1,0,0.75,0.75"));
+    CHECK_FALSE(arma3_frame_ok("INTERNAL,1,2,3"));
+    CHECK_FALSE(arma3_frame_ok("INTERNAL,1,2,3,1,0,0,0,0,1,0,1,0,0.75,0.75,1"));
+    CHECK_FALSE(arma3_frame_ok("INTERNAL,1,2,3,1,0,0,0,0,1,0,1,0,0.75,0.75\nx"));
 }
 
 TEST_CASE("format_double keeps full precision and a decimal point") {

@@ -1,6 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- .NET Framework 4.8 ships with Windows 10 1903+ and 11: the exe (~40 KB plus the addon) runs without installing a
-       runtime. Builds on any OS with the .NET SDK: dotnet build -c Release -->
+  <!-- .NET Framework 4.8 ships with Windows 10 1903+ and 11: the exe runs without installing a runtime. It embeds the
+       addon source and the C++ odx_capture_x64.dll, so build that first: research/arma3-camera-spike/launcher/build.ps1
+       on Windows runs CMake (Release) then this project. -->
+
   <PropertyGroup>
     <TargetFramework>net48</TargetFramework>
     <OutputType>WinExe</OutputType>
@@ -18,5 +20,7 @@
     <Reference Include="Microsoft.CSharp" />
     <!-- The addon's source goes into the exe; Launch packs it into @OdxCapture\addons\odx_capture.pbo. -->
     <EmbeddedResource Include="..\..\..\..\capture\native\arma3-mod\odx_capture\**\*" LogicalName="addon/%(RecursiveDir)%(Filename)%(Extension)" />
+    <!-- The extension the addon calls each frame; Launch writes it next to the addon as @OdxCapture\odx_capture_x64.dll. -->
+    <EmbeddedResource Include="..\..\..\..\capture\native\extractor\build\Release\odx_capture_x64.dll" LogicalName="odx_capture_x64.dll" />
   </ItemGroup>
 </Project>

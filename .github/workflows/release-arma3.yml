@@ -1,7 +1,8 @@
 name: Release Arma 3 launcher
 
-# Builds OdxArma3.exe (the odx_capture addon embedded) and attaches it to a GitHub release arma3-v<version>.
-# Start it by pushing a tag arma3-v0.1.0, or by hand (Actions -> Release Arma 3 launcher -> Run workflow).
+# Builds OdxArma3.exe (the odx_capture addon and the C++ odx_capture_x64.dll embedded) and attaches it to a GitHub
+# release arma3-v<version>. Start it by pushing a tag arma3-v0.1.0, or by hand (Actions -> Release Arma 3 launcher ->
+# Run workflow). Runs on Windows because the extension DLL needs MSVC + CMake.
 
 on:
   push:
@@ -14,7 +15,7 @@ on:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     permissions:
       contents: write
     steps:
@@ -24,18 +25,26 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
-      - name: Build
+      # The launcher embeds odx_capture_x64.dll, so build it first (Release, next to the launcher's EmbeddedResource path).
+      - name: Build odx_capture_x64.dll
+        run: |
+          cmake -S capture/native/extractor -B capture/native/extractor/build
+          cmake --build capture/native/extractor/build --config Release --target odx_capture
+
+      - name: Build OdxArma3.exe
+        shell: pwsh
         env:
           INPUT_VERSION: ${{ inputs.version }}
         run: |
-          version="${INPUT_VERSION:-${GITHUB_REF_NAME#arma3-v}}"
-          dotnet build -c Release -p:Version="$version" research/arma3-camera-spike/launcher/OdxArma3
-          echo "VERSION=$version" >> "$GITHUB_ENV"
+          $version = if ($env:INPUT_VERSION) { $env:INPUT_VERSION } else { $env:GITHUB_REF_NAME -replace '^arma3-v', '' }
+          dotnet build -c Release -p:Version=$version research/arma3-camera-spike/launcher/OdxArma3
+          "VERSION=$version" >> $env:GITHUB_ENV
 
       - name: Release
+        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "arma3-v$VERSION" research/arma3-camera-spike/launcher/OdxArma3/bin/Release/net48/OdxArma3.exe \
-            --target "$GITHUB_SHA" --latest=false --title "Odx Arma 3 $VERSION" \
-            --notes "Built from ${GITHUB_SHA::7}. Copy OdxArma3.exe anywhere on the player's PC and double-click (research/arma3-camera-spike/README.md)."
+          gh release create "arma3-v$env:VERSION" research/arma3-camera-spike/launcher/OdxArma3/bin/Release/net48/OdxArma3.exe `
+            --target $env:GITHUB_SHA --latest=false --title "Odx Arma 3 $env:VERSION" `
+            --notes "Built from $($env:GITHUB_SHA.Substring(0,7)). Copy OdxArma3.exe anywhere on the player's PC and double-click (research/arma3-camera-spike/README.md)."

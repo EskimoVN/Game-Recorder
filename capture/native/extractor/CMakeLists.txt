@@ -25,7 +25,7 @@ endif()
 # Portable core: memory/signatures, Lua profiles, camera sample recorder. Canonical geometry, input aggregation and
 # frames.csv / session.json live in dotnet/ only (odx build), which consumes the recorder's output.
 add_library(odx_core STATIC
-  src/memory.cpp src/profile.cpp src/config.cpp src/recorder.cpp src/fake_game.cpp)
+  src/memory.cpp src/profile.cpp src/config.cpp src/recorder.cpp src/fake_game.cpp src/arma3_log.cpp)
 target_include_directories(odx_core PUBLIC include)
 target_link_libraries(odx_core PUBLIC lua_static)
 
@@ -46,6 +46,12 @@ if(WIN32)
     src/win/dllmain.cpp src/win/present_hook.cpp src/win/process_memory.cpp)
   target_link_libraries(odx_extractor PRIVATE odx_core minhook d3d11 dxgi psapi)
   target_compile_definitions(odx_extractor PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
+
+  # Arma 3 loads <name>_x64.dll for `"odx_capture" callExtension ...` from the addon's folder.
+  add_library(odx_capture SHARED src/win/arma3_extension.cpp)
+  set_target_properties(odx_capture PROPERTIES OUTPUT_NAME odx_capture_x64)
+  target_link_libraries(odx_capture PRIVATE odx_core)
+  target_compile_definitions(odx_capture PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
 
   add_executable(odx_inject tools/win/inject_main.cpp)
   target_compile_definitions(odx_inject PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)

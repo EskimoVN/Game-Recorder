@@ -58,7 +58,10 @@ static class Program
         catch (Exception) { }  // A missing shortcut only costs the user a trip to the exe.
     }
 
-    /// <summary>The embedded addon source, packed into &lt;game&gt;\@OdxCapture\addons\odx_capture.pbo (the folder replaced as a whole).</summary>
+    /// <summary>
+    /// The embedded addon source, packed into &lt;game&gt;\@OdxCapture\addons\odx_capture.pbo (the folder replaced as a
+    /// whole), and the extension the addon calls each frame, written to &lt;game&gt;\@OdxCapture\odx_capture_x64.dll.
+    /// </summary>
     public static void InstallAddon(string game)
     {
         var mod = Path.Combine(game, ModFolder);
@@ -73,8 +76,11 @@ static class Program
                 source.CopyTo(buffer);
                 return (Name: name.Substring("addon/".Length).Replace('/', '\\'), Data: buffer.ToArray());
             }).ToList();
-        using var pbo = File.Create(Path.Combine(mod, "addons", AddonName + ".pbo"));
-        Pbo.Write(pbo, AddonName, files);
+        using (var pbo = File.Create(Path.Combine(mod, "addons", AddonName + ".pbo")))
+            Pbo.Write(pbo, AddonName, files);
+        using var dll = assembly.GetManifestResourceStream("odx_capture_x64.dll")!;
+        using var dllFile = File.Create(Path.Combine(mod, "odx_capture_x64.dll"));
+        dll.CopyTo(dllFile);
     }
 
     /// <summary>The game itself, BattlEye's wrapper left out (the Odx servers run BattlEye = 0): -mod loads the addon, -profiles puts the .rpt where odx-app reads the camera log.</summary>
