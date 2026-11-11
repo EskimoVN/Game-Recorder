@@ -38,7 +38,6 @@ public partial class MainWindow : Window
     private const uint MOD_NOREPEAT = 0x4000;
     private const int CountdownSeconds = 3;
     private const int MaxVideosPerBatch = 15;
-    private const uint WDA_NONE = 0, WDA_EXCLUDEFROMCAPTURE = 0x11;  // Windows 10 2004+
     private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
 
     private readonly AppSettings _settings = AppSettings.Load();
@@ -201,7 +200,6 @@ public partial class MainWindow : Window
     {
         base.OnSourceInitialized(e);
         _hwnd = new WindowInteropHelper(this).Handle;
-        ExcludeFromCaptureUnlessIdle();
         // Dark title bar to match the dark window (Windows 10 2004+; older builds ignore it).
         int dark = 1;
         DwmSetWindowAttribute(_hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ref dark, sizeof(int));
@@ -409,16 +407,6 @@ public partial class MainWindow : Window
         GameLabel.Visibility = GameBox.Visibility = FpsLabel.Visibility = FpsBox.Visibility = inRoom ? Visibility.Collapsed : Visibility.Visible;
         RefreshButton.IsEnabled = idle;
         _tray.Text = idle ? "Odx Capture" : _t.TrayTooltip(_trayStartStop.Text);
-        ExcludeFromCaptureUnlessIdle();
-    }
-
-    /// <summary>
-    /// Out of screen capture whenever a recording can run (3-2-1, recording, stopping, in a room), so recording a monitor
-    /// never shows this window (its timer, the task ID); idle, it can be captured (screenshots, screen sharing for help).
-    /// </summary>
-    private void ExcludeFromCaptureUnlessIdle()
-    {
-        if (_hwnd != IntPtr.Zero) SetWindowDisplayAffinity(_hwnd, _state == RunState.Idle ? WDA_NONE : WDA_EXCLUDEFROMCAPTURE);
     }
 
     private void BeginCountdown()
@@ -1065,9 +1053,6 @@ public partial class MainWindow : Window
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint dwAffinity);
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
