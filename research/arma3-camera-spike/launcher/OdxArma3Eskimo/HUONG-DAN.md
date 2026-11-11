@@ -26,12 +26,14 @@ Phần quay camera của công ty giữ nguyên.
 - Bất tử: bật lại mỗi giây, kể cả sau khi hồi sinh.
 - Vô hạn đạn: bắn xong băng đạn được nạp đầy. Lựu đạn, mìn được trả lại.
   Súng trên xe chỉ được nạp lại khi xe do máy mình điều khiển.
-- Ẩn HUD: thông tin súng, tâm ngắm, la bàn, radar, chỉ báo nhóm, thông báo chết, khung chat, phụ đề.
-- Vẫn giữ menu cuộn chuột, để mở cửa và lên xe.
+- Ẩn toàn bộ HUD ở mọi khung hình: thông tin súng, tâm ngắm, la bàn, radar, chỉ báo nhóm, thông báo chết.
+- Ẩn luôn HUD do mission tự vẽ, ví dụ tiền CP và thu nhập mỗi phút của Warlords.
+- Ẩn tip hướng dẫn, thông báo, hint, khung chat, phụ đề.
+- Menu cuộn chuột bị ẩn nhưng vẫn dùng được. Lăn chuột rồi bấm phím hành động như thường lệ.
 
 ## Kiểm tra nhanh sau khi vào game
 
-- Không thấy tâm ngắm, la bàn, thông tin súng.
+- Màn hình không còn chữ hay biểu tượng nào. Không thấy tiền CP, tip, tâm ngắm.
 - Bắn hết một băng mà đạn không giảm.
 - File `.rpt` mới nhất trong `%LOCALAPPDATA%\Arma 3` có dòng `ESKIMO,on,…`.
   Thấy `ESKIMO,off,…` nghĩa là tên server sai.
@@ -39,4 +41,5 @@ Phần quay camera của công ty giữ nguyên.
 ## Lưu ý
 
 - `OdxArma3.exe` của công ty vẫn dùng được, nhưng không có mod Eskimo.
-- Một số mission tự vẽ HUD riêng, phần đó có thể vẫn hiện. Gặp mission như vậy thì báo lại.
+- Biểu tượng 3D do mission vẽ trong thế giới có thể vẫn hiện. Gặp thì chụp màn hình gửi lại.
+- Màn hình chờ hồi sinh cũng bị xoá, nên lúc hồi sinh có thể thấy cảnh game thay vì màn đen.
