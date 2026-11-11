@@ -53,13 +53,19 @@ jobs:
           path: research/reforger-camera-spike/launcher/OdxReforger/bin/Release/net48/OdxReforger.exe
 
   arma3-launcher:
-    runs-on: ubuntu-latest
+    # Windows: the exe embeds odx_capture_x64.dll, built by CMake + MSVC first (as release-arma3.yml does).
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
+
+      - name: Build odx_capture_x64.dll
+        run: |
+          cmake -S capture/native/extractor -B capture/native/extractor/build
+          cmake --build capture/native/extractor/build --config Release --target odx_capture
 
       - name: Build OdxArma3.exe
         run: dotnet build -c Release research/arma3-camera-spike/launcher/OdxArma3
