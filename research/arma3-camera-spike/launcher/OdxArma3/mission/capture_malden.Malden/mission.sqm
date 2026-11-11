@@ -1,0 +1,180 @@
+version=12;
+class Mission
+{
+	addOns[]={"A3_Characters_F"};
+	addOnsAuto[]={"A3_Characters_F"};
+	randomSeed=1;
+	class Intel
+	{
+		startWeather=0;
+		forecastWeather=0;
+		year=2035;
+		month=7;
+		day=6;
+		hour=12;
+		minute=0;
+	};
+	class Groups
+	{
+		items=1;
+		class Item0
+		{
+			side="WEST";
+			class Vehicles
+			{
+				items=16;
+				class Item0
+				{
+					position[]={5000,0,7500};
+					id=0;
+					side="WEST";
+					vehicle="B_Soldier_F";
+					player="PLAY CDG";
+					leader=1;
+					skill=0.6;
+				};
+				class Item1
+				{
+					position[]={5004,0,7500};
+					id=1;
+					side="WEST";
+					vehicle="B_Soldier_F";
+					player="PLAY CDG";
+					skill=0.6;
+				};
+				class Item2
+				{
+					position[]={5008,0,7500};
+					id=2;
+					side="WEST";
+					vehicle="B_Soldier_F";
+					player="PLAY CDG";
+					skill=0.6;
+				};
+				class Item3
+				{
+					position[]={5012,0,7500};
+					id=3;
+					side="WEST";
+					vehicle="B_Soldier_F";
+					player="PLAY CDG";
+					skill=0.6;
+				};
+				class Item4
+				{
+					position[]={5016,0,7500};
+					id=4;
+					side="WEST";
+					vehicle="B_Soldier_F";
+					player="PLAY CDG";
+					skill=0.6;
+				};
+				class Item5
+				{
+					position[]={5020,0,7500};
+					id=5;
+					side="WEST";
+					vehicle="B_Soldier_F";
+					player="PLAY CDG";
+					skill=0.6;
+				};
+				class Item6
+				{
+					position[]={5024,0,7500};
+					id=6;
+					side="WEST";
+					vehicle="B_Soldier_F";
+					player="PLAY CDG";
+					skill=0.6;
+				};
+				class Item7
+				{
+					position[]={5028,0,7500};
+					id=7;
+					side="WEST";
+					vehicle="B_Soldier_F";
+					player="PLAY CDG";
+					skill=0.6;
+				};
+				class Item8
+				{
+					position[]={5032,0,7500};
+					id=8;
+					side="WEST";
+					vehicle="B_Soldier_F";
+					player="PLAY CDG";
+					skill=0.6;
+				};
+				class Item9
+				{
+					position[]={5036,0,7500};
+					id=9;
+					side="WEST";
+					vehicle="B_Soldier_F";
+					player="PLAY CDG";
+					skill=0.6;
+				};
+				class Item10
+				{
+					position[]={5040,0,7500};
+					id=10;
+					side="WEST";
+					vehicle="B_Soldier_F";
+					player="PLAY CDG";
+					skill=0.6;
+				};
+				class Item11
+				{
+					position[]={5044,0,7500};
+					id=11;
+					side="WEST";
+					vehicle="B_Soldier_F";
+					player="PLAY CDG";
+					skill=0.6;
+				};
+				class Item12
+				{
+					position[]={5048,0,7500};
+					id=12;
+					side="WEST";
+					vehicle="B_Soldier_F";
+					player="PLAY CDG";
+					skill=0.6;
+				};
+				class Item13
+				{
+					position[]={5052,0,7500};
+					id=13;
+					side="WEST";
+					vehicle="B_Soldier_F";
+					player="PLAY CDG";
+					skill=0.6;
+				};
+				class Item14
+				{
+					position[]={5056,0,7500};
+					id=14;
+					side="WEST";
+					vehicle="B_Soldier_F";
+					player="PLAY CDG";
+					skill=0.6;
+				};
+				class Item15
+				{
+					position[]={5060,0,7500};
+					id=15;
+					side="WEST";
+					vehicle="B_Soldier_F";
+					player="PLAY CDG";
+					skill=0.6;
+				};
+			};
+		};
+	};
+};
+class Intro
+{
+	addOns[]={};
+	addOnsAuto[]={};
+	randomSeed=1;
+};

@@ -1,4 +1,4 @@
-onLoadName = "Odx capture - Altis (god mode, no AI)";
+onLoadName = "Odx capture (god mode, no AI)";
 respawn = 3;
 respawnDelay = 5;
 respawnOnStart = -1;
