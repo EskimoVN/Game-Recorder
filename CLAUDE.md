@@ -96,6 +96,7 @@ capture/
     extractor/                    # C++20 + Lua 5.4: in-game camera extractor DLL (camera_samples.csv), odx_synth, profiles
     cs2-plugin/                   # C++ Metamod:Source 2.0 plugin: CS2 dedicated server net message log (JSONL)
     reforger-mod/OdxCapture/   # Enforce Script mod for Arma Reforger: camera log per round (odx-app converts it)
+    arma3-mod/odx_capture/        # SQF addon for Arma 3: camera log per frame into the .rpt (odx-app converts it)
   profiles/                       # game profiles (session.json fields + key/button -> action bindings); games/ in the package
   config/
     odx-capture.json           # deployment config copied next to the executables (time_server, orchestrator)
@@ -107,6 +108,7 @@ capture/
 research/
   analyze-pose/                   # Standalone Python pose audit (numpy), not part of the product
   reforger-camera-spike/          # Arma Reforger camera spike: Enforce Script logger mod + analyze.py (layout, FOV, clock)
+  arma3-camera-spike/             # Arma 3: launcher/OdxArma3 (net48 exe that packs the addon into @OdxCapture and starts the game)
   reforger-spawn-survey/          # Everon terrain survey mod + picker behind capture/deploy/aws/reforger/spawn_points.txt,
                                   #   launcher/OdxReforger: net48 exe that installs the mod and starts the game
 ```

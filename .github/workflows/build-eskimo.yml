@@ -15,7 +15,7 @@ on:
         default: ''
       base:
         description: Upstream release used as the base package
-        default: capture-v0.3.2
+        default: capture-v0.3.4
 
 permissions:
   contents: write
@@ -25,7 +25,7 @@ jobs:
     runs-on: windows-latest
     env:
       INPUT_VERSION: ${{ inputs.version || '' }}
-      BASE_TAG: ${{ inputs.base || 'capture-v0.3.2' }}
+      BASE_TAG: ${{ inputs.base || 'capture-v0.3.4' }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - name: Version from the branch
@@ -48,7 +48,7 @@ jobs:
       - name: Unit tests
         shell: pwsh
         run: |
-          $filter = 'FullyQualifiedName~SessionBuilderTests|FullyQualifiedName~ValidatorTests.Each_violation_is_caught|' +
+          $filter = 'FullyQualifiedName~SessionBuilderTests|FullyQualifiedName~Arma3CameraTests|FullyQualifiedName~ValidatorTests.Each_violation_is_caught|' +
                     'FullyQualifiedName~ValidatorTests.Every_error_rule_has_a_mutator|FullyQualifiedName~ValidatorTests.Valid_session_has_no_issues'
           dotnet test capture/dotnet/tests/Odx.Tests --filter $filter
           if ($LASTEXITCODE -ne 0) { throw 'unit tests failed' }

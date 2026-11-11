@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- .NET Framework 4.8 ships with Windows 10 1903+ and 11: the exe runs without installing a runtime. It embeds the
+       addon source and the C++ odx_capture_x64.dll, so build that first: research/arma3-camera-spike/launcher/build.ps1
+       on Windows runs CMake (Release) then this project. -->
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <OutputType>WinExe</OutputType>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <AssemblyName>OdxArma3</AssemblyName>
+    <RootNamespace>OdxArma3</RootNamespace>
+    <!-- Release builds get the tag's version (release-arma3.yml); the window title shows it. -->
+    <Version>0.0.0-dev</Version>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="Microsoft.CSharp" />
+    <!-- The addon's source goes into the exe; Launch packs it into @OdxCapture\addons\odx_capture.pbo. -->
+    <EmbeddedResource Include="..\..\..\..\capture\native\arma3-mod\odx_capture\**\*" LogicalName="addon/%(RecursiveDir)%(Filename)%(Extension)" />
+    <!-- The extension the addon calls each frame; Launch writes it next to the addon as @OdxCapture\odx_capture_x64.dll. -->
+    <EmbeddedResource Include="..\..\..\..\capture\native\extractor\build\Release\odx_capture_x64.dll" LogicalName="odx_capture_x64.dll" />
+    <!-- The capture mission (god mode, no AI, 16 slots); Launch writes it to Documents\Arma 3\MPMissions so this machine can host it on LAN. -->
+    <EmbeddedResource Include="mission\**\*" LogicalName="mission/%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+</Project>

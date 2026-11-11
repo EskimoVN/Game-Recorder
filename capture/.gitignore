@@ -5,6 +5,8 @@ build/
 cmake-build-*/
 # Local capture output from manual runs
 odx_capture/
+# ...but the Arma 3 addon source shares that name and must be tracked
+!native/arma3-mod/odx_capture/
 # Packaging output and download cache (dotnet/publish.ps1)
 dist/
 .cache/

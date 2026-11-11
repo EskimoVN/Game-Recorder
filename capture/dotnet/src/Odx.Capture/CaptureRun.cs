@@ -95,6 +95,8 @@ public sealed class CaptureRun : ICaptureRun
     /// <summary>The round's session id when the agent runs this capture (its DirName); null for a capture outside a room.</summary>
     private readonly string? _sessionId;
     private readonly string? _reforgerDir;
+    /// <summary>control.txt that tells odx_capture_x64.dll which capture to log into; null unless the profile's camera_source is arma3-mod.</summary>
+    private readonly string? _arma3Control;
     private readonly double? _roundStartUtcMs, _originRttMs;
     private readonly string? _gridOrigin;
     private double _roundEndUtcMs = double.NaN;
@@ -125,6 +127,19 @@ public sealed class CaptureRun : ICaptureRun
         _fps = options.Fps;
         Directory.CreateDirectory(SessionDir);
         var profile = TryLoadProfile(options.GameProfile);
+        if (profile?.CameraSource == Arma3Camera.Source)
+        {
+            _arma3Control = Arma3Camera.ControlPath();
+            try
+            {
+                Arma3Camera.Begin(_arma3Control, SessionDir);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                _stderr.Add($"cannot start the Arma 3 camera log: {e.Message}");
+                _arma3Control = null;
+            }
+        }
         if (profile?.CameraSource == ReforgerCamera.Source)
         {
             _reforgerDir = ReforgerCamera.OdxDir();
@@ -343,6 +358,8 @@ public sealed class CaptureRun : ICaptureRun
         if (_reforgerDir is not null &&
             ReforgerCamera.Collect(_reforgerDir, Path.GetFileName(SessionDir), SessionDir, TimeSpan.FromSeconds(3)) is { } warning)
             lock (_stderr) _stderr.Add(warning);
+        if (_arma3Control is not null && Arma3Camera.Collect(_arma3Control, SessionDir, TimeSpan.FromSeconds(3)) is { } arma3Warning)
+            lock (_stderr) _stderr.Add(arma3Warning);
         List<string> errors;
         lock (_stderr) errors = [.. _stderr];
         SetPhase(CapturePhase.Building, 100);
