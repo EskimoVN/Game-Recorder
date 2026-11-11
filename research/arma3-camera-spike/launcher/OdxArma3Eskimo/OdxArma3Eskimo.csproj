@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The company's OdxArma3 launcher plus the Eskimo tweaks addon. ../OdxArma3/Program.cs is compiled in unchanged, with
+       the same embedded resources, so @OdxCapture, its DLL and the capture missions install exactly as OdxArma3.exe does;
+       EskimoProgram adds @OdxEskimo and starts the game with both mods. Build odx_capture_x64.dll first (../build.ps1). -->
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <OutputType>WinExe</OutputType>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <AssemblyName>OdxArma3Eskimo</AssemblyName>
+    <RootNamespace>OdxArma3</RootNamespace>
+    <StartupObject>OdxArma3.EskimoProgram</StartupObject>
+    <Version>0.0.0-dev</Version>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="Microsoft.CSharp" />
+    <Compile Include="..\OdxArma3\Program.cs" Link="OdxArma3\Program.cs" />
+    <EmbeddedResource Include="..\..\..\..\capture\native\arma3-mod\odx_capture\**\*" LogicalName="addon/%(RecursiveDir)%(Filename)%(Extension)" />
+    <EmbeddedResource Include="..\..\..\..\capture\native\extractor\build\Release\odx_capture_x64.dll" LogicalName="odx_capture_x64.dll" />
+    <EmbeddedResource Include="..\OdxArma3\mission\**\*" LogicalName="mission/%(RecursiveDir)%(Filename)%(Extension)" />
+    <EmbeddedResource Include="..\..\..\..\capture\native\arma3-mod-eskimo\eskimo_tweaks\**\*" LogicalName="eskimo/%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+</Project>

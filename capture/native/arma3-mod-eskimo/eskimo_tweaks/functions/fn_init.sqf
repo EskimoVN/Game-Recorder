@@ -1,0 +1,36 @@
+// Eskimo capture tweaks for the local player: god mode, infinite ammo, no HUD. Only on Odx/Eskimo private play
+// (single player, this machine hosting, or a server whose name starts with "Odx" or "Eskimo"); never on other servers.
+// Separate from odx_capture: its Draw3D camera logger is left alone, so showHUD keeps element 0 (scripted HUD) on.
+if (!hasInterface) exitWith {};
+
+[] spawn {
+    waitUntil { !isNull player && {time > 0} };
+
+    private _server = toLower serverName;
+    private _allowed = !isMultiplayer || {isServer} || {(_server find "odx") == 0} || {(_server find "eskimo") == 0};
+    if (!_allowed) exitWith { diag_log format ["ESKIMO,off,server %1", serverName]; };
+    diag_log format ["ESKIMO,on,server %1,mission %2", serverName, missionName];
+
+    // [scriptedHUD, info, radar, compass, direction, menu, group, cursors, panels, kills, showIcon3D]; mirrors the
+    // Custom difficulty of capture/deploy/aws/arma3/odx.Arma3Profile. menu stays on: the action menu opens doors and vehicles.
+    private _hud = [true, false, false, false, false, true, false, false, false, false, false];
+
+    // Reapplied every second: respawn gives a new unit, and missions may turn the HUD or damage back on.
+    while {true} do {
+        if (alive player) then {
+            player allowDamage false;
+            if (isNil {player getVariable "eskimo_ammo"}) then {
+                player setVariable ["eskimo_ammo", player addEventHandler ["FiredMan", {
+                    params ["_unit", "_weapon", "", "", "", "_magazine", "", "_vehicle"];
+                    if (!isNull _vehicle) exitWith { if (local _vehicle) then { _vehicle setVehicleAmmo 1; }; };
+                    if (_weapon in ["Throw", "Put"]) exitWith { _unit addMagazine _magazine; };
+                    _unit setVehicleAmmo 1;
+                }]];
+            };
+        };
+        showHUD _hud;
+        showChat false;
+        showSubtitles false;
+        sleep 1;
+    };
+};

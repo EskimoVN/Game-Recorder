@@ -1,0 +1,50 @@
+name: Release Eskimo Arma 3 launcher
+
+# Builds OdxArma3Eskimo.exe (the company's OdxArma3 launcher compiled unchanged + the eskimo_tweaks addon: god mode,
+# infinite ammo, no HUD) and attaches it to a GitHub release eskimo-arma3-v<version>. Start it by pushing a tag
+# eskimo-arma3-v0.1.0, or by hand (Actions -> Release Eskimo Arma 3 launcher -> Run workflow). Mirrors release-arma3.yml.
+
+on:
+  push:
+    tags: ['eskimo-arma3-v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Launcher version, e.g. 0.1.0
+        required: true
+
+jobs:
+  release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Build odx_capture_x64.dll
+        run: |
+          cmake -S capture/native/extractor -B capture/native/extractor/build
+          cmake --build capture/native/extractor/build --config Release --target odx_capture
+
+      - name: Build OdxArma3Eskimo.exe
+        shell: pwsh
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          $version = if ($env:INPUT_VERSION) { $env:INPUT_VERSION } else { $env:GITHUB_REF_NAME -replace '^eskimo-arma3-v', '' }
+          dotnet build -c Release -p:Version=$version research/arma3-camera-spike/launcher/OdxArma3Eskimo
+          if ($LASTEXITCODE) { exit 1 }
+          "VERSION=$version" >> $env:GITHUB_ENV
+
+      - name: Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "eskimo-arma3-v$env:VERSION" research/arma3-camera-spike/launcher/OdxArma3Eskimo/bin/Release/net48/OdxArma3Eskimo.exe `
+            --target $env:GITHUB_SHA --latest=false --title "Eskimo Arma 3 $env:VERSION" `
+            --notes "Built from $($env:GITHUB_SHA.Substring(0,7)). OdxArma3 launcher + Eskimo tweaks (god mode, infinite ammo, no HUD). Private Odx/Eskimo servers only, BattlEye off. Guide: research/arma3-camera-spike/launcher/OdxArma3Eskimo/HUONG-DAN.md"
