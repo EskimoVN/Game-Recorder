@@ -61,6 +61,21 @@ static class Program
         File.WriteAllBytes(Path.Combine(mod, "addons", AddonName + ".pbo"), Pbo(AddonName, files));
     }
 
+    /// <summary>Documents\Arma 3\MPMissions\: where the client's "Host Server" reads missions, so this machine can host the capture mission on LAN. Joining clients download it from the host.</summary>
+    public static void InstallMission()
+    {
+        var missions = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Arma 3", "MPMissions");
+        var assembly = Assembly.GetExecutingAssembly();
+        foreach (var name in assembly.GetManifestResourceNames().Where(n => n.StartsWith("mission/")))
+        {
+            var dest = Path.Combine(missions, name.Substring("mission/".Length).Replace('/', '\\'));
+            Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
+            using var source = assembly.GetManifestResourceStream(name)!;
+            using var file = File.Create(dest);
+            source.CopyTo(file);
+        }
+    }
+
     /// <summary>
     /// Unsigned and uncompressed: a "Vers" header entry with the prefix property, one entry per file, an empty terminator
     /// entry, the file data, then a zero byte and the SHA-1 of everything before it. Enough for the editor, single player
@@ -201,6 +216,7 @@ sealed class LauncherForm : Form
         try
         {
             Program.InstallMod(game);
+            Program.InstallMission();
             _settings["game"] = game;
             _settings["server"] = server;
             _settings["password"] = password;

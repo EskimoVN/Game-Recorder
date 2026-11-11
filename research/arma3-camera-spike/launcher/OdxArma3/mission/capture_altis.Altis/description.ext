@@ -1,0 +1,16 @@
+onLoadName = "Odx capture - Altis (god mode, no AI)";
+respawn = 3;
+respawnDelay = 5;
+respawnOnStart = -1;
+disabledAI = 1;
+joinUnassigned = 1;
+skipLobby = 0;
+briefing = 0;
+debriefing = 0;
+
+class Header
+{
+    gameType = "Coop";
+    minPlayers = 1;
+    maxPlayers = 16;
+};
