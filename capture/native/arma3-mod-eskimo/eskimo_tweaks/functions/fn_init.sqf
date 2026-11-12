@@ -1,5 +1,6 @@
 // Eskimo capture tweaks for the local player: god mode, infinite ammo, no HUD. Only on Odx/Eskimo private play
-// (single player, this machine hosting, or a server whose name starts with "Odx" or "Eskimo"); never on other servers.
+// (single player, this machine hosting, or a server whose name starts with "Eskimo"); never on other servers, the
+// company's Odx servers included: their rules stay as the company set them.
 // The HUD itself is the company addon's (odx_capture ODX_fnc_hideHud, showHUD all off, applied at start and after a
 // respawn); this only fills its gaps: it is applied again every frame, as a mission may turn the HUD back on mid-round.
 if (!hasInterface) exitWith {};
@@ -8,7 +9,7 @@ if (!hasInterface) exitWith {};
     waitUntil { !isNull player && {time > 0} };
 
     private _server = toLower serverName;
-    private _allowed = !isMultiplayer || {isServer} || {(_server find "odx") == 0} || {(_server find "eskimo") == 0};
+    private _allowed = !isMultiplayer || {isServer} || {(_server find "eskimo") == 0};
     if (!_allowed) exitWith { diag_log format ["ESKIMO,off,server %1", serverName]; };
     diag_log format ["ESKIMO,on,server %1,mission %2", serverName, missionName];
 

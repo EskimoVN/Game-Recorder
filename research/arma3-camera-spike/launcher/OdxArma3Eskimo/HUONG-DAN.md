@@ -5,9 +5,10 @@ Phần của công ty giữ nguyên. Mod Eskimo chỉ thêm bất tử, vô hạ
 
 ## Chỉ dùng ở đâu
 
-- Server riêng của Odx hoặc Eskimo, LAN, hoặc máy mình tự host.
+- Chơi một mình, máy mình tự host, hoặc server Eskimo trong LAN.
 - KHÔNG dùng trên server công khai hay server bật BattlEye.
-- Mod Eskimo tự tắt khi tên server không bắt đầu bằng "Odx" hoặc "Eskimo".
+- Mod Eskimo tự tắt khi tên server không bắt đầu bằng "Eskimo".
+- Trên server Odx của công ty, mod Eskimo cũng tắt. Luật server công ty giữ nguyên.
 
 ## Cách chạy
 
