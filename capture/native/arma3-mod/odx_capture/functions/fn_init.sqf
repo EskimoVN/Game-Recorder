@@ -4,6 +4,13 @@
 // [right, up, forward] and returns AGL; ASL is the only absolute height (document/games/arma3.md §2, §3).
 if (!hasInterface) exitWith {};
 
+// HUD-free video whatever difficulty the host picked (document/games/arma3.md §5): showHUD hides what the Custom
+// difficulty flags leave (action menu, command bar, panels, cursors, group icons); the game turns it back on when the
+// player respawns, so it is hidden again then. Hint popups are not covered by either.
+ODX_fnc_hideHud = { showHUD [false, false, false, false, false, false, false, false, false, false, false]; };
+call ODX_fnc_hideHud;
+addMissionEventHandler ["EntityRespawned", { if ((_this select 0) isEqualTo player) then { call ODX_fnc_hideHud; }; }];
+
 addMissionEventHandler ["Draw3D", {
     private _origin = AGLToASL positionCameraToWorld [0, 0, 0];
     private _fields = [cameraView];

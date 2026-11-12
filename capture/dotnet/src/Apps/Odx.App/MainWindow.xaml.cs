@@ -258,6 +258,8 @@ public partial class MainWindow : Window
         SourceBox.SelectedItem = items.First(i => i.Process == _settings.WindowProcess);
     }
 
+    private const string DefaultGame = "Arma 3";
+
     /// <summary>Game profiles shipped in games/ next to the app, plus a previously chosen file elsewhere.</summary>
     private void LoadGames()
     {
@@ -290,7 +292,8 @@ public partial class MainWindow : Window
             items.Add(new GameItem(Path.GetFileNameWithoutExtension(saved), saved, Game: game));
         }
         GameBox.ItemsSource = items;
-        GameBox.SelectedItem = items.FirstOrDefault(i => i.Path == _settings.GameProfile) ?? items[0];
+        // Arma 3 until the player picks another game: a room opened without thinking of it still records the right profile.
+        GameBox.SelectedItem = items.FirstOrDefault(i => i.Path == _settings.GameProfile) ?? items.FirstOrDefault(i => i.Game == DefaultGame) ?? items[0];
     }
 
     private void SaveSettings()
