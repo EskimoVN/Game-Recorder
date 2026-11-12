@@ -31,9 +31,40 @@ public sealed partial class MatchCoordinator(OrchestratorOptions options, int ti
     /// <summary>The room LAN node of each agent whose connection was lost: revoked if it is still gone after the grace.</summary>
     private readonly Dictionary<string, (string Network, string Node)> _awayLan = [];
     private long _absences;
-    private readonly string _profileJson = File.ReadAllText(options.GameProfilePath);
-    private readonly string _profileGame = JsonNode.Parse(File.ReadAllText(options.GameProfilePath))?["game_title"]?.GetValue<string>()
+    /// <summary>The game profiles a room can play, by game_title: every profile in the folder of <see cref="OrchestratorOptions.GameProfilePath"/>.</summary>
+    private readonly IReadOnlyDictionary<string, string> _profiles = LoadProfiles(options.GameProfilePath);
+    /// <summary>The game of a room opened without one (<see cref="OrchestratorOptions.GameProfilePath"/>, a game server plugin's room).</summary>
+    private readonly string _defaultGame = GameTitle(File.ReadAllText(options.GameProfilePath))
         ?? throw new InvalidDataException($"{options.GameProfilePath}: no game_title");
+
+    private string ProfileJson(Room room) => ProfileJson(room.Game);
+
+    /// <summary>A room restored with a game this orchestrator no longer has falls back to the default.</summary>
+    private string ProfileJson(string game) => _profiles.TryGetValue(game, out var json) ? json : _profiles[_defaultGame];
+
+    private static string? GameTitle(string json) => JsonNode.Parse(json)?["game_title"]?.GetValue<string>();
+
+    /// <summary>Every *.json with a game_title in the default profile's folder (games/ in the package), the default itself last.</summary>
+    private static Dictionary<string, string> LoadProfiles(string defaultPath)
+    {
+        var profiles = new Dictionary<string, string>();
+        string full = Path.GetFullPath(defaultPath);
+        foreach (string file in Directory.GetFiles(Path.GetDirectoryName(full)!, "*.json").Where(f => f != full).Append(full))
+        {
+            string json = File.ReadAllText(file);
+            string? title;
+            try
+            {
+                title = GameTitle(json);
+            }
+            catch (Exception e) when (e is System.Text.Json.JsonException or InvalidOperationException)  // not a profile
+            {
+                continue;
+            }
+            if (title is not null) profiles[title] = json;
+        }
+        return profiles;
+    }
     private long _eventId;
     private ServerClock? _serverClock;
     private readonly ZeroTierApi? _zeroTier = options is { ZeroTierApi: { } api, ZeroTierToken: { } token } ? new ZeroTierApi(api, token) : null;
@@ -65,11 +96,11 @@ public sealed partial class MatchCoordinator(OrchestratorOptions options, int ti
                 else log.LogInformation("agent {Player}: {State} {Detail}", link.Id, s.State, s.Detail);
                 if (room is not null) effects.Changed.Add(room);
                 break;
-            case CreateRoom:
+            case CreateRoom c:  // its game checked before the LAN was made (ReadAsync)
                 Leave(link, "left_room", effects);
-                var created = new Room(NewCode(), link.Id) { LanNetworkId = lanNetwork };
+                var created = new Room(NewCode(), link.Id) { LanNetworkId = lanNetwork, Game = c.Game ?? _defaultGame };
                 _rooms[created.Code] = created;
-                log.LogInformation("room {Room} opened by {Player}{Lan}", created.Code, link.Id,
+                log.LogInformation("room {Room} opened by {Player} for {Game}{Lan}", created.Code, link.Id, created.Game,
                     lanNetwork is null ? "" : $", LAN {lanNetwork}");
                 Join(link, created, effects);
                 break;
@@ -212,7 +243,7 @@ public sealed partial class MatchCoordinator(OrchestratorOptions options, int ti
             {
                 var update = new RoomUpdate(r.Code, r.HostPlayerId,
                     r.Members.Select(a => new RoomMember(a.Id, a.Hello.Name, a.Ready, a.State, a.Problem)).ToList(),
-                    r.Current?.Record.SessionId, r.Current?.Counting ?? false, r.LanNetworkId);
+                    r.Current?.Record.SessionId, r.Current?.Counting ?? false, r.Game, ProfileJson(r), r.LanNetworkId);
                 return r.Members.Select(a => (a, (AgentMessage)update));
             }).ToList();
         }
