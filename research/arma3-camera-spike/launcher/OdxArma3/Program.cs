@@ -66,14 +66,15 @@ static class Program
     }
 
     /// <summary>
-    /// Documents\Arma 3\MPMissions\&lt;mission&gt;.pbo: where the client's "Host Server" reads missions, so this machine can host
-    /// the capture missions on LAN. Packed, the form a host sends to joining clients; the unpacked folders of 0.1.4–0.2.0 are
-    /// removed so each mission is listed once.
+    /// &lt;game&gt;\MPMissions\&lt;mission&gt;.pbo: the folder the game lists packed missions from in Host Server (the editor's
+    /// "Export to multiplayer" writes there too), packed being the form a host sends to joining clients. What earlier
+    /// versions wrote into Documents\Arma 3\MPMissions (unpacked folders, 0.2.2's .pbo files) is removed.
     /// </summary>
-    public static void InstallMission()
+    public static void InstallMission(string game)
     {
-        var missions = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Arma 3", "MPMissions");
+        var missions = Path.Combine(game, "MPMissions");
         Directory.CreateDirectory(missions);
+        var documents = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Arma 3", "MPMissions");
         var assembly = Assembly.GetExecutingAssembly();
         // MSBuild's %(RecursiveDir) puts a backslash after the mission folder when built on Windows, a slash elsewhere.
         var resources = assembly.GetManifestResourceNames().Where(n => n.StartsWith("mission/"))
@@ -87,9 +88,10 @@ static class Program
                 source.CopyTo(bytes);
                 return (Name: r.Path.Substring(mission.Key.Length + 1).Replace('/', '\\'), Data: bytes.ToArray());
             }).ToList();
-            string unpacked = Path.Combine(missions, mission.Key);
-            if (Directory.Exists(unpacked)) Directory.Delete(unpacked, recursive: true);
-            File.WriteAllBytes(unpacked + ".pbo", Pbo(mission.Key, files));
+            File.WriteAllBytes(Path.Combine(missions, mission.Key + ".pbo"), Pbo(mission.Key, files));
+            string old = Path.Combine(documents, mission.Key);
+            if (Directory.Exists(old)) Directory.Delete(old, recursive: true);
+            if (File.Exists(old + ".pbo")) File.Delete(old + ".pbo");
         }
     }
 
@@ -267,7 +269,7 @@ sealed class LauncherForm : Form
         try
         {
             Program.InstallMod(game);
-            Program.InstallMission();
+            Program.InstallMission(game);
             string? firewall = Program.AllowThroughFirewall(Path.Combine(game, Program.GameExe));
             _settings["game"] = game;
             _settings["server"] = server;

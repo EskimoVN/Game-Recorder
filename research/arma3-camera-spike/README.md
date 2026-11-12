@@ -14,8 +14,9 @@ The player side of Arma 3 capture (document/games/arma3.md §3, §5), the counte
 - `launcher/OdxArma3/`: `OdxArma3.exe` (net48 WinForms, the addon, `odx_capture_x64.dll` and the capture missions
   embedded). A window: game folder, server (`ip:port`, empty to start into the menu and host or use the editor), password,
   window or fullscreen. On Launch it writes the addon and the extension into `<game>\@OdxCapture\`, packs each
-  `mission/capture_<terrain>.<World>` into `Documents\Arma 3\MPMissions\<name>.pbo` (packed, the form a hosting client
-  sends to joining players; the unpacked folders earlier versions left there are removed), adds the Windows Firewall rule
+  `mission/capture_<terrain>.<World>` into `<game>\MPMissions\<name>.pbo` (packed, the form a hosting client sends to
+  joining players, in the folder Host Server lists packed missions from; what earlier versions put in
+  `Documents\Arma 3\MPMissions` is removed), adds the Windows Firewall rule
   "Odx Arma 3" letting `arma3_x64.exe` in on every network profile (one UAC prompt; Radmin VPN and ZeroTier adapters
   count as public networks, which the firewall's own first-host prompt leaves blocked), remembers the fields in
   `%APPDATA%\OdxArma3\settings.txt` and starts `arma3_x64.exe -mod=@OdxCapture -noSplash -skipIntro -showScriptErrors
