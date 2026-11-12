@@ -21,7 +21,8 @@ The player side of Arma 3 capture (document/games/arma3.md §3, §5), the counte
   `%APPDATA%\OdxArma3\settings.txt` and starts `arma3_x64.exe -mod=@OdxCapture -noSplash -skipIntro -showScriptErrors
   [-window] [-connect=<ip> -port=<port> -password=<pw>]` (the game itself, not BattlEye's wrapper; the addon is unsigned).
   The status line shows this PC's Radmin VPN / ZeroTier IPv4: what the others enter as Server to join a game hosted here
-  (Multiplayer → Host Server → a `capture_*` mission, difficulty Custom for the HUD-off options). It finds the game in
+  (Multiplayer → Host Server → a `capture_*` mission). The addon hides the HUD on every client (`showHUD`, again after a
+  respawn), so the video is HUD-free whichever difficulty the host picked. It finds the game in
   the last folder used, its own folder or Steam's libraries.
 
 Build: `powershell -File research/arma3-camera-spike/launcher/build.ps1 -OutDir <folder>` on Windows (CMake builds the DLL first, then the net48 exe).
