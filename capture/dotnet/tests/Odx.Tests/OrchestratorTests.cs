@@ -98,6 +98,12 @@ public sealed class OrchestratorTests : IAsyncLifetime
             {"game_title": "Synthetic", "platform": "PC", "localization": "en-US",
              "input_mouse_convention": {"maps_to": "camera_look_velocity"}, "bindings": {"W": "Forward"}}
             """);
+        // A second game next to the default: a host may open a room for it (TheHostsGameChoosesTheRoomsProfile).
+        File.WriteAllText(Path.Combine(_root, "other.json"), """
+            {"game_title": "Other", "platform": "PC", "localization": "en-US", "window_process": "other_x64",
+             "network": {"protocol": "raw", "ports": ["udp/2302"]},
+             "input_mouse_convention": {"maps_to": "camera_look_velocity"}, "bindings": {"V": "Get Out"}}
+            """);
         _ntp = NtpResponder.Bind(0);
         _ = NtpResponder.RunAsync(_ntp, _stop.Token);
         _ntpServer = $"127.0.0.1:{((IPEndPoint)_ntp.Client.LocalEndPoint!).Port}";
@@ -156,11 +162,11 @@ public sealed class OrchestratorTests : IAsyncLifetime
     /// <param name="room">Invite code to join; null opens a new room with this player as host.</param>
     /// <param name="timeServer">The NTP server the agent checks its clock against before being ready; null skips the check.</param>
     private (AgentClient Agent, TaskCompletionSource Started) Connect(string? template, string player, string? room, string? timeServer = null,
-        TimeSpan building = default)
+        TimeSpan building = default, string? game = null)
     {
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var agent = new AgentClient(new AgentOptions(_http.BaseAddress!, player, player.ToUpperInvariant(),
-            Path.Combine(_root, "agent-" + player), null, RoomCode: room, CreateRoom: room is null, TimeServer: timeServer), options =>
+            Path.Combine(_root, "agent-" + player), null, RoomCode: room, CreateRoom: room is null, TimeServer: timeServer, Game: game), options =>
         {
             try
             {
@@ -176,10 +182,10 @@ public sealed class OrchestratorTests : IAsyncLifetime
         return (agent, started);
     }
 
-    /// <summary>Opens a room hosted by <paramref name="host"/> and returns its invite code.</summary>
-    private async Task<(AgentClient Host, TaskCompletionSource Started, string Code)> HostRoom(string host)
+    /// <summary>Opens a room hosted by <paramref name="host"/> (for <paramref name="game"/>, else the default) and returns its invite code.</summary>
+    private async Task<(AgentClient Host, TaskCompletionSource Started, string Code)> HostRoom(string host, string? game = null)
     {
-        var (agent, started) = Connect(null, host, null);
+        var (agent, started) = Connect(null, host, null, game: game);
         for (int i = 0; i < 100 && agent.Room is null; i++) await Task.Delay(50);
         return (agent, started, agent.Room?.Code ?? throw new TimeoutException("no room opened"));
     }
@@ -596,6 +602,48 @@ public sealed class OrchestratorTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task TheHostsGameChoosesTheRoomsProfileForEveryMemberAndRound()
+    {
+        var (host, hostStarted, code) = await HostRoom("p1", "Other");
+        var (member, memberStarted) = Connect(null, "p2", code);
+        await WaitForAgents(2, code);
+        for (int i = 0; i < 100 && !(host.PacketsWanted && member.PacketsWanted); i++) await Task.Delay(50);
+        Assert.Equal("Other", host.Room!.Game);
+        Assert.Equal("Other", member.Room!.Game);
+        Assert.Equal("Other", (string?)JsonNode.Parse(member.Room.GameProfileJson)!["game_title"]);
+        Assert.True(host.PacketsWanted);  // Other records packets, the default game does not
+        Assert.True(member.PacketsWanted);
+        Assert.Equal("Other", (string?)(await RoomStatus(code))["game"]);
+        var recorded = new TaskCompletionSource<RoundFiles>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _coordinator.RoundRecorded += files => recorded.TrySetResult(files);
+        host.Packets = new PacketCaptureTests.FakePackets();
+        member.Packets = new PacketCaptureTests.FakePackets();  // wanted packets without a capture cannot be ready
+        await member.SetReadyAsync(true, default);
+        for (int i = 0; i < 100 && !host.Room!.Members.All(m => m.PlayerId == "p1" || m.Ready); i++) await Task.Delay(50);
+
+        await host.ToggleRoundAsync(0, default);
+        await Task.WhenAll(hostStarted.Task, memberStarted.Task).WaitAsync(TimeSpan.FromSeconds(5));
+        await host.ToggleRoundAsync(0, default);
+
+        var files = await recorded.Task.WaitAsync(TimeSpan.FromSeconds(15));
+        Assert.Equal("Other", (string?)JsonNode.Parse(files.GameProfile)!["game_title"]);
+        Assert.Equal("Get Out", (string?)JsonNode.Parse(files.GameProfile)!["bindings"]!["V"]);
+        Assert.Equal("Other", (string?)JsonNode.Parse(files.Round)!["game"]);
+    }
+
+    [Fact]
+    public async Task ARoomForAGameTheOrchestratorDoesNotHaveIsRefused()
+    {
+        var (agent, _) = Connect(null, "p1", null, game: "Nope");
+        var refused = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        agent.RoomError += m => refused.TrySetResult(m);
+
+        string message = await refused.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal("this orchestrator has no game profile \"Nope\"; it has: Other, Synthetic", message);
+        Assert.Null(agent.Room);
+    }
+
+    [Fact]
     public async Task StoppingDuringTheCountdownCancelsTheRoundAndItsNumberIsUsedAgain()
     {
         var (_, hostStarted, code) = await HostRoom("p1");
@@ -981,7 +1029,7 @@ public sealed class RoomLanTests
 
 public sealed class PacketCaptureTests
 {
-    private sealed class FakePackets : IPacketCapture
+    internal sealed class FakePackets : IPacketCapture
     {
         public List<string> Calls { get; } = [];
 

@@ -15,7 +15,7 @@ on:
         default: ''
       base:
         description: Upstream release used as the base package
-        default: capture-v0.3.4
+        default: capture-v0.3.5
 
 permissions:
   contents: write
@@ -25,7 +25,7 @@ jobs:
     runs-on: windows-latest
     env:
       INPUT_VERSION: ${{ inputs.version || '' }}
-      BASE_TAG: ${{ inputs.base || 'capture-v0.3.4' }}
+      BASE_TAG: ${{ inputs.base || 'capture-v0.3.5' }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - name: Version from the branch

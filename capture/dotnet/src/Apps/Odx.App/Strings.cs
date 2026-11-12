@@ -101,7 +101,7 @@ public sealed class Strings
     public required Func<string, string, string> RoundCaptureFailed { get; init; }
     public required string PlayerIdentityRequired { get; init; }
     public required string JoiningRoom { get; init; }
-    public required Func<string, bool, string, string> RoomStatus { get; init; }
+    public required Func<string, string, bool, string, string> RoomStatus { get; init; }
     /// <summary>What a member is doing, after their name: starting, recording, saving; empty when idle.</summary>
     public required Func<string, string> MemberState { get; init; }
     /// <summary>The round's outcome for the whole room: the players to record again (failed) and those to check (degraded), each with their problems.</summary>
@@ -248,7 +248,7 @@ public sealed class Strings
         RoundCaptureFailed = (session, dir) => $"✗ Round {session}: capture failed (what was recorded stays in {dir})",
         PlayerIdentityRequired = "Fill in your Player ID (1-32 lowercase letters, digits, - or _) and your Name first.",
         JoiningRoom = "Joining the room…",
-        RoomStatus = (code, host, members) => $"Room {code}{(host ? " · you are the host: share this invite code" : "")}\nPlayers: {members}",
+        RoomStatus = (code, game, host, members) => $"Room {code} · {game}{(host ? " · you are the host: share this invite code" : "")}\nPlayers: {members}",
         MemberState = state => state switch { "starting" => " · starting", "recording" => " · recording", "saving" => " · saving…", _ => "" },
         RoundVerdict = (session, failed, degraded) =>
             failed.Count == 0 && degraded.Count == 0 ? $"✓ Round {session}: all OK" :
@@ -409,7 +409,7 @@ public sealed class Strings
         RoundCaptureFailed = (session, dir) => $"✗ Round {session}: ghi lỗi (phần đã ghi vẫn ở {dir})",
         PlayerIdentityRequired = "Hãy điền Mã người chơi (1-32 chữ thường, số, - hoặc _) và Tên trước.",
         JoiningRoom = "Đang vào room…",
-        RoomStatus = (code, host, members) => $"Room {code}{(host ? " · bạn là host: gửi mã mời này cho mọi người" : "")}\nNgười chơi: {members}",
+        RoomStatus = (code, game, host, members) => $"Room {code} · {game}{(host ? " · bạn là host: gửi mã mời này cho mọi người" : "")}\nNgười chơi: {members}",
         MemberState = state => state switch { "starting" => " · đang khởi động", "recording" => " · đang ghi", "saving" => " · đang lưu…", _ => "" },
         RoundVerdict = (session, failed, degraded) =>
             failed.Count == 0 && degraded.Count == 0 ? $"✓ Round {session}: tất cả OK" :

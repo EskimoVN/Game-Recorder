@@ -68,7 +68,6 @@ public sealed partial class MatchCoordinator
     {
         room.MatchId = GameEvents.Text(e, "match_id") ??
                        $"{room.Code}-{DateTime.UtcNow.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture)}";
-        room.Game = GameEvents.Text(e, "game") ?? _profileGame;
         room.Map = GameEvents.Text(e, "map");
         room.RoundNumber = 0;
         log.LogInformation("room {Room}: match {Match}, {Game} {Map}", room.Code, room.MatchId, room.Game, room.Map);
@@ -103,7 +102,7 @@ public sealed partial class MatchCoordinator
         foreach (var a in players)
         {
             a.State = "starting";
-            effects.Sends.Add((a, new Arm(sid, _profileJson, options.Fps)));
+            effects.Sends.Add((a, new Arm(sid, ProfileJson(room), options.Fps)));
             effects.Sends.Add((a, new Start(sid, countdownMs, utc + countdownMs)));
         }
         if (server is not null) effects.Sends.Add((server, new Start(sid, countdownMs, utc + countdownMs)));
@@ -213,7 +212,7 @@ public sealed partial class MatchCoordinator
             links = record.Players.Select(p => _agents.GetValueOrDefault(p.PlayerId)).OfType<AgentLink>().ToList();
             if (round.Server is { } id && _gameServers.TryGetValue(id, out var server)) links.Add(server);
         }
-        var files = new RoundFiles(record.SessionId, record.ToJson(), RoundRecord.EventsJsonl(events), _profileJson);
+        var files = new RoundFiles(record.SessionId, record.ToJson(), RoundRecord.EventsJsonl(events), ProfileJson(round.Room));
         foreach (var link in links) await SendAsync(link, files);
         lock (_lock)
         {

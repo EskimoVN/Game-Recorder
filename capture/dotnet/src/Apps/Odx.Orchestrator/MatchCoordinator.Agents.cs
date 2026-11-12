@@ -55,8 +55,7 @@ public sealed partial class MatchCoordinator
             return;
         }
         log.LogInformation("agent {Player} ({Name}, {Version}) connected", hello.PlayerId, hello.Name, hello.ToolVersion);
-        await SendAsync(link, new Welcome(timePort, _profileJson, (int)options.ReconnectGrace.TotalMilliseconds,
-            Volatile.Read(ref _serverClock)));
+        await SendAsync(link, new Welcome(timePort, (int)options.ReconnectGrace.TotalMilliseconds, Volatile.Read(ref _serverClock)));
         await RunAsync(resumed);
 
         try
@@ -72,6 +71,12 @@ public sealed partial class MatchCoordinator
                 if (message is LanMember lan)
                 {
                     _ = AuthorizeLanAsync(link, lan.NodeId, stop);  // an HTTP call: off this loop, which must keep reading PONGs
+                    continue;
+                }
+                if (message is CreateRoom { Game: { } wanted } && !_profiles.ContainsKey(wanted))
+                {
+                    await SendAsync(link, new RoomError(
+                        $"this orchestrator has no game profile \"{wanted}\"; it has: {string.Join(", ", _profiles.Keys.Order())}"));
                     continue;
                 }
                 string? lanNetwork = null;
@@ -165,8 +170,7 @@ public sealed partial class MatchCoordinator
             Resume(link, resumed);
         }
         log.LogInformation("game server agent {Id} ({Name}, {Version}) connected", link.Id, link.Hello.Name, link.Hello.ToolVersion);
-        await SendAsync(link, new Welcome(timePort, _profileJson, (int)options.ReconnectGrace.TotalMilliseconds,
-            Volatile.Read(ref _serverClock)));
+        await SendAsync(link, new Welcome(timePort, (int)options.ReconnectGrace.TotalMilliseconds, Volatile.Read(ref _serverClock)));
         await RunAsync(resumed);
         try
         {
@@ -223,7 +227,7 @@ public sealed partial class MatchCoordinator
         lock (_lock) round = Store?.Round(sessionId);
         if (round is not { State: "finished" }) return;
         log.LogInformation("{Agent}: the files of {Session}, which finished while it was away", link.Id, sessionId);
-        await SendAsync(link, new RoundFiles(sessionId, round.Record.ToJson(), RoundRecord.EventsJsonl(round.Events), _profileJson));
+        await SendAsync(link, new RoundFiles(sessionId, round.Record.ToJson(), RoundRecord.EventsJsonl(round.Events), ProfileJson(round.Record.Game)));
     }
 
     private void MarkDone(string sessionId, string playerId, bool ok, string? error, CaptureReport? report)

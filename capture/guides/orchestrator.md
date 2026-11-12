@@ -27,7 +27,7 @@ $bin = 'D:\odx\odx-capture-0.1.0-win-x64\bin'
 
 | Option | |
 |---|---|
-| `--game-profile` | The game every room plays: `games\cs2.json`. |
+| `--game-profile` | The default game, e.g. `games\cs2.json`. Every profile in that folder is available: a room plays the game its host had selected in odx-app when opening it, the default when the host had none or a game server plugin opened the room. |
 | `--access-key` | Or `ODX_ACCESS_KEY`. Every request must carry it; put the same key in the players' package and give it to the game server agent. Use one whenever the orchestrator is reachable from the internet. |
 | `--http-port`, `--time-port` | Default 5180 (TCP) and 12300 (UDP). |
 | `--fps` | The players' recording rate; default 30. |

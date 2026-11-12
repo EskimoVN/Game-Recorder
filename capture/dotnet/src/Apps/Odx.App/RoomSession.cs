@@ -91,7 +91,7 @@ public sealed class RoomSession : IDisposable
     // Off the caller's thread: a WPF caller's continuations would wait for the dispatcher it blocks.
     public Task RunAsync() => Task.Run(() => Agent.RunUntilStoppedAsync(_stop.Token));
 
-    /// <summary>Once per agent: a reconnect asks again, and the capture it got stays.</summary>
+    /// <summary>Once per agent: the room's profile asks when it is applied, and the capture it got stays.</summary>
     private async Task WantPacketsAsync()
     {
         if (Agent.Packets is not null) return;
