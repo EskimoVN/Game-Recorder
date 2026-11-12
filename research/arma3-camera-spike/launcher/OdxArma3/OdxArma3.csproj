@@ -22,7 +22,7 @@
     <EmbeddedResource Include="..\..\..\..\capture\native\arma3-mod\odx_capture\**\*" LogicalName="addon/%(RecursiveDir)%(Filename)%(Extension)" />
     <!-- The extension the addon calls each frame; Launch writes it next to the addon as @OdxCapture\odx_capture_x64.dll. -->
     <EmbeddedResource Include="..\..\..\..\capture\native\extractor\build\Release\odx_capture_x64.dll" LogicalName="odx_capture_x64.dll" />
-    <!-- The capture mission (god mode, no AI, 16 slots); Launch writes it to Documents\Arma 3\MPMissions so this machine can host it on LAN. -->
+    <!-- The capture missions (god mode, no AI, 16 slots); Launch packs each into <game>\MPMissions\<name>.pbo so this machine can host it on LAN. -->
     <EmbeddedResource Include="mission\**\*" LogicalName="mission/%(RecursiveDir)%(Filename)%(Extension)" />
   </ItemGroup>
 </Project>
