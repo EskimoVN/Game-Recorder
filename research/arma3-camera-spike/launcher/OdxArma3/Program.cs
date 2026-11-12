@@ -4,6 +4,8 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
@@ -17,7 +19,9 @@ static class Program
 {
     const string ModName = "@OdxCapture";
     const string AddonName = "odx_capture";
-    const string GameExe = "arma3_x64.exe";
+    public const string GameExe = "arma3_x64.exe";
+    const string FirewallRule = "Odx Arma 3";
+    public const int GamePort = 2302;
 
     [STAThread]
     static void Main()
@@ -61,20 +65,63 @@ static class Program
         File.WriteAllBytes(Path.Combine(mod, "addons", AddonName + ".pbo"), Pbo(AddonName, files));
     }
 
-    /// <summary>Documents\Arma 3\MPMissions\: where the client's "Host Server" reads missions, so this machine can host the capture mission on LAN. Joining clients download it from the host.</summary>
+    /// <summary>
+    /// Documents\Arma 3\MPMissions\&lt;mission&gt;.pbo: where the client's "Host Server" reads missions, so this machine can host
+    /// the capture missions on LAN. Packed, the form a host sends to joining clients; the unpacked folders of 0.1.4–0.2.0 are
+    /// removed so each mission is listed once.
+    /// </summary>
     public static void InstallMission()
     {
         var missions = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Arma 3", "MPMissions");
+        Directory.CreateDirectory(missions);
         var assembly = Assembly.GetExecutingAssembly();
-        foreach (var name in assembly.GetManifestResourceNames().Where(n => n.StartsWith("mission/")))
+        foreach (var mission in assembly.GetManifestResourceNames().Where(n => n.StartsWith("mission/")).GroupBy(n => n.Split('/')[1]))
         {
-            var dest = Path.Combine(missions, name.Substring("mission/".Length).Replace('/', '\\'));
-            Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
-            using var source = assembly.GetManifestResourceStream(name)!;
-            using var file = File.Create(dest);
-            source.CopyTo(file);
+            string prefix = "mission/" + mission.Key + "/";
+            var files = mission.OrderBy(n => n, StringComparer.Ordinal).Select(n =>
+            {
+                using var source = assembly.GetManifestResourceStream(n)!;
+                using var bytes = new MemoryStream();
+                source.CopyTo(bytes);
+                return (Name: n.Substring(prefix.Length).Replace('/', '\\'), Data: bytes.ToArray());
+            }).ToList();
+            string unpacked = Path.Combine(missions, mission.Key);
+            if (Directory.Exists(unpacked)) Directory.Delete(unpacked, recursive: true);
+            File.WriteAllBytes(unpacked + ".pbo", Pbo(mission.Key, files));
         }
     }
+
+    /// <summary>
+    /// An inbound rule for the game on every network profile, so a game hosted here is reachable over Radmin VPN or ZeroTier:
+    /// Windows' own prompt on the first host offers private networks only, and those adapters count as public. netsh needs
+    /// administrator rights, hence the UAC prompt; declining it leaves the rule to the player. Returns a warning in that case.
+    /// </summary>
+    public static string? AllowThroughFirewall(string exe)
+    {
+        var shown = Process.Start(new ProcessStartInfo("netsh", $"advfirewall firewall show rule name=\"{FirewallRule}\" verbose")
+            { UseShellExecute = false, RedirectStandardOutput = true, CreateNoWindow = true })!;
+        string rules = shown.StandardOutput.ReadToEnd();
+        shown.WaitForExit();
+        if (rules.IndexOf(exe, StringComparison.OrdinalIgnoreCase) >= 0) return null;
+        try
+        {
+            var add = Process.Start(new ProcessStartInfo("netsh",
+                $"advfirewall firewall add rule name=\"{FirewallRule}\" dir=in action=allow program=\"{exe}\" enable=yes profile=any")
+                { UseShellExecute = true, Verb = "runas", WindowStyle = ProcessWindowStyle.Hidden })!;
+            add.WaitForExit();
+            return add.ExitCode == 0 ? null : "Windows Firewall rule not added: others may not reach a game hosted here.";
+        }
+        catch (System.ComponentModel.Win32Exception)  // UAC declined
+        {
+            return "Windows Firewall rule declined: allow arma3_x64.exe on public networks yourself, or others cannot reach a game hosted here.";
+        }
+    }
+
+    /// <summary>The IPv4 of a Radmin VPN or ZeroTier adapter: what the others enter as Server to reach a game hosted on this PC.</summary>
+    public static string? VpnAddress() => NetworkInterface.GetAllNetworkInterfaces()
+        .Where(n => n.OperationalStatus == OperationalStatus.Up && Regex.IsMatch(n.Name + " " + n.Description, "Radmin|ZeroTier", RegexOptions.IgnoreCase))
+        .SelectMany(n => n.GetIPProperties().UnicastAddresses.Select(a => a.Address))
+        .FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetwork)?.ToString();
 
     /// <summary>
     /// Unsigned and uncompressed: a "Vers" header entry with the prefix property, one entry per file, an empty terminator
@@ -196,8 +243,10 @@ sealed class LauncherForm : Form
         (settings["fullscreen"] == "true" ? _fullscreen : _window).Checked = true;
         Controls.AddRange(new Control[] { _window, _fullscreen });
 
-        _status = new Label { Location = new Point(12, 170), Size = new Size(400, 30) };
-        if (game == null) _status.Text = "Arma 3 not found: choose its game folder.";
+        _status = new Label { Location = new Point(12, 170), Size = new Size(410, 40) };
+        _status.Text = game == null ? "Arma 3 not found: choose its game folder."
+            : Program.VpnAddress() is { } ip ? $"To join a game hosted on this PC, the others enter {ip}:{Program.GamePort} as Server."
+            : "No Radmin VPN or ZeroTier adapter is up on this PC.";
         Controls.Add(_status);
 
         var launch = new Button { Text = "Launch", Location = new Point(428, 165), Size = new Size(80, 30) };
@@ -217,13 +266,15 @@ sealed class LauncherForm : Form
         {
             Program.InstallMod(game);
             Program.InstallMission();
+            string? firewall = Program.AllowThroughFirewall(Path.Combine(game, Program.GameExe));
             _settings["game"] = game;
             _settings["server"] = server;
             _settings["password"] = password;
             _settings["fullscreen"] = _fullscreen.Checked ? "true" : "false";
             _settings.Save();
             Program.StartGame(game, server, password, _window.Checked);
-            Close();
+            if (firewall is null) Close();
+            else Fail(firewall);  // the game runs; the window stays for the player to read this
         }
         catch (Exception e) { Fail(e.Message); }
     }
