@@ -1,7 +1,7 @@
 // Eskimo capture tweaks for the local player: god mode, infinite ammo, no HUD. Only on Odx/Eskimo private play
 // (single player, this machine hosting, or a server whose name starts with "Odx" or "Eskimo"); never on other servers.
-// Separate from odx_capture: its Draw3D camera logger is left alone. showHUD keeps element 0 (scripted HUD) on because
-// off would also disable the action menu (doors, vehicles); the HUDs missions draw themselves are removed instead.
+// The HUD itself is the company addon's (odx_capture ODX_fnc_hideHud, showHUD all off, applied at start and after a
+// respawn); this only fills its gaps: it is applied again every frame, as a mission may turn the HUD back on mid-round.
 if (!hasInterface) exitWith {};
 
 [] spawn {
@@ -12,12 +12,11 @@ if (!hasInterface) exitWith {};
     if (!_allowed) exitWith { diag_log format ["ESKIMO,off,server %1", serverName]; };
     diag_log format ["ESKIMO,on,server %1,mission %2", serverName, missionName];
 
-    // Every frame, so nothing a mission shows survives into a recorded frame. showHUD elements: [scriptedHUD, info, radar,
-    // compass, direction, menu, group, cursors, panels, kills, showIcon3D]; cursors off hides the action menu but keeps it
-    // usable. Cut layers (cutRsc HUDs such as Warlords' CP and income, notifications, tips), hints and controls scripts add
-    // to the mission display 46 are cleared as well.
+    // Every frame, so nothing a mission shows survives into a recorded frame. Besides the company's showHUD: hints (not
+    // covered by it, see odx_capture fn_init.sqf), chat, the cut and title layers missions put their own HUDs, notifications
+    // and tips on (Warlords' CP and income), and controls scripts add to the mission display 46.
     addMissionEventHandler ["EachFrame", {
-        showHUD [true, false, false, false, false, false, false, false, false, false, false];
+        if (!isNil "ODX_fnc_hideHud") then { call ODX_fnc_hideHud; };
         showChat false;
         hintSilent "";
         { _x cutFadeOut 0; } forEach allCutLayers;

@@ -18,7 +18,6 @@ static class EskimoProgram
     const string CaptureMod = "@OdxCapture";
     const string EskimoMod = "@OdxEskimo";
     const string EskimoAddon = "eskimo_tweaks";
-    const string GameExe = "arma3_x64.exe";
 
     [STAThread]
     static void Main()
@@ -108,7 +107,7 @@ static class EskimoProgram
             args += $" -connect={hostPort[0]} -port={hostPort[1]}";
             if (password.Length > 0) args += $" \"-password={password}\"";
         }
-        Process.Start(new ProcessStartInfo(Path.Combine(game, GameExe), args) { WorkingDirectory = game, UseShellExecute = false });
+        Process.Start(new ProcessStartInfo(Path.Combine(game, Program.GameExe), args) { WorkingDirectory = game, UseShellExecute = false });
     }
 }
 
@@ -122,9 +121,8 @@ sealed class EskimoForm : Form
     public EskimoForm(Settings settings, string? game)
     {
         _settings = settings;
-        var version = Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
-        Text = $"Odx Arma 3 Launcher (Eskimo) {version}";
-        ClientSize = new Size(520, 230);
+        Text = "Odx Arma 3 (Eskimo) " + Application.ProductVersion;
+        ClientSize = new Size(520, 240);
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
@@ -153,8 +151,10 @@ sealed class EskimoForm : Form
             Location = new Point(12, 150), Size = new Size(500, 20), ForeColor = Color.DimGray,
         });
 
-        _status = new Label { Location = new Point(12, 190), Size = new Size(400, 30) };
-        if (game == null) _status.Text = "Arma 3 not found: choose its game folder.";
+        _status = new Label { Location = new Point(12, 190), Size = new Size(410, 40) };
+        _status.Text = game == null ? "Arma 3 not found: choose its game folder."
+            : Program.VpnAddress() is { } ip ? $"To join a game hosted on this PC, the others enter {ip}:{Program.GamePort} as Server."
+            : "No Radmin VPN or ZeroTier adapter is up on this PC.";
         Controls.Add(_status);
 
         var launch = new Button { Text = "Launch", Location = new Point(428, 185), Size = new Size(80, 30) };
@@ -163,25 +163,42 @@ sealed class EskimoForm : Form
         AcceptButton = launch;
     }
 
+    /// <summary>LauncherForm.Launch (0.2.3) with the Eskimo mod installed and both mods on the command line.</summary>
     void Launch()
     {
-        var game = _game.Text.Trim();
         var server = _server.Text.Trim();
         var password = _password.Text;
+        string game;
+        try
+        {
+            game = Path.GetFullPath(_game.Text.Trim());
+        }
+        catch (ArgumentException)
+        {
+            Fail("The game folder is not a valid path.");
+            return;
+        }
         if (!Program.IsGame(game)) { Fail("arma3_x64.exe not found in the game folder."); return; }
+        if (Process.GetProcessesByName("arma3_x64").Length > 0)
+        {
+            Fail("Arma 3 is running: close it first (it holds the addon and mission files).");
+            return;
+        }
         if (server.Length > 0 && !Regex.IsMatch(server, @"^[\w.-]+:\d+$")) { Fail("Server must be ip:port, e.g. 10.0.0.5:2302."); return; }
         try
         {
             Program.InstallMod(game);
-            Program.InstallMission();
+            Program.InstallMission(game);
             EskimoProgram.InstallEskimoMod(game);
+            string? firewall = Program.AllowThroughFirewall(Path.Combine(game, Program.GameExe), _settings);
             _settings["game"] = game;
             _settings["server"] = server;
             _settings["password"] = password;
             _settings["fullscreen"] = _fullscreen.Checked ? "true" : "false";
             _settings.Save();
             EskimoProgram.StartGame(game, server, password, _window.Checked);
-            Close();
+            if (firewall is null) Close();
+            else Fail(firewall);
         }
         catch (Exception e) { Fail(e.Message); }
     }
