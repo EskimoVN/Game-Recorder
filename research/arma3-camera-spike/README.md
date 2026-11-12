@@ -11,17 +11,22 @@ The player side of Arma 3 capture (document/games/arma3.md §3, §5), the counte
   the round's clock samples, writes them as `raw/arma3_camera.csv` (pinned by `capture/dotnet/fixtures/arma3_camera.csv`)
   and puts them on QPC as `camera_samples.csv` + `extractor.json` (convention `rfu`: Arma's world is X east, Y north, Z up).
   The game profile `capture/profiles/arma3.json` names the route: `"camera_source": "arma3-mod"`.
-- `launcher/OdxArma3/`: `OdxArma3.exe` (net48 WinForms, ~40 KB with the addon embedded). A window: game folder, server
-  (`ip` or `ip:port`, default port 2302), password (default `odx`, see `capture/deploy/aws/arma3/server.cfg`), window or
-  fullscreen, profile folder. On Launch it packs the embedded addon into `<game>\@OdxCapture\addons\odx_capture.pbo`
-  (the folder replaced as a whole; `Pbo` mirrors `capture/deploy/aws/arma3/pack_pbo.py`), remembers the fields in
-  `%APPDATA%\OdxArma3\settings.txt` (odx-app reads `profile=` there to find the `.rpt`) and starts
-  `arma3_x64.exe -noLauncher -noSplash -skipIntro -mod=@OdxCapture -profiles=<profile> -name=odx -connect=<ip> -port=<port> -password=<pw>`
-  (the game itself, not BattlEye's wrapper: the Odx servers run `BattlEye = 0` and `verifySignatures = 0`, the addon
-  being unsigned). A profile folder inside OneDrive is refused: syncing locks the game's files. It finds the game in the
-  last folder used, its own folder or Steam's libraries, and puts an "Odx Arma 3" shortcut on the Desktop on the first run.
+- `launcher/OdxArma3/`: `OdxArma3.exe` (net48 WinForms, the addon, `odx_capture_x64.dll` and the capture missions
+  embedded). A window: game folder, server (`ip:port`, empty to start into the menu and host or use the editor), password,
+  window or fullscreen. On Launch it writes the addon and the extension into `<game>\@OdxCapture\`, packs each
+  `mission/capture_<terrain>.<World>` into `<game>\MPMissions\<name>.pbo` (packed, the form a hosting client sends to
+  joining players, in the folder Host Server lists packed missions from; what earlier versions put in
+  `Documents\Arma 3\MPMissions` is removed), adds the Windows Firewall rule
+  "Odx Arma 3" letting `arma3_x64.exe` in on every network profile (one UAC prompt; Radmin VPN and ZeroTier adapters
+  count as public networks, which the firewall's own first-host prompt leaves blocked), remembers the fields in
+  `%APPDATA%\OdxArma3\settings.txt` and starts `arma3_x64.exe -mod=@OdxCapture -noSplash -skipIntro -showScriptErrors
+  [-window] [-connect=<ip> -port=<port> -password=<pw>]` (the game itself, not BattlEye's wrapper; the addon is unsigned).
+  The status line shows this PC's Radmin VPN / ZeroTier IPv4: what the others enter as Server to join a game hosted here
+  (Multiplayer → Host Server → a `capture_*` mission). The addon hides the HUD on every client (`showHUD`, again after a
+  respawn), so the video is HUD-free whichever difficulty the host picked. It finds the game in
+  the last folder used, its own folder or Steam's libraries.
 
-Build: `dotnet build -c Release research/arma3-camera-spike/launcher/OdxArma3` → `bin/Release/net48/OdxArma3.exe`.
+Build: `powershell -File research/arma3-camera-spike/launcher/build.ps1 -OutDir <folder>` on Windows (CMake builds the DLL first, then the net48 exe).
 Releases: a tag `arma3-v<version>` (release-arma3.yml) attaches the exe to the release of that name; the window title shows
 the version. Players need the server's game version (2.18.152405 on `arma3-server`, document/games/arma3.md).
 

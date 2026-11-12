@@ -79,7 +79,7 @@ public sealed partial class MatchCoordinator
     {
         lock (_lock)
         {
-            var room = new Room(NewCode(), null, server);
+            var room = new Room(NewCode(), null, server) { Game = _defaultGame };
             _rooms[room.Code] = room;
             var opened = new Effects();
             opened.Changed.Add(room);

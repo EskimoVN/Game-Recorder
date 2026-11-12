@@ -18,7 +18,8 @@ public sealed record SourceItem(string Label, string? Process)
     public override string ToString() => Label;  // what screen readers announce
 }
 
-public sealed record GameItem(string Label, string? Path, string? WindowProcess = null)
+/// <param name="Game">The profile's game_title, what a room opened with this choice plays; null for no profile.</param>
+public sealed record GameItem(string Label, string? Path, string? WindowProcess = null, string? Game = null)
 {
     public override string ToString() => Label;
 }
@@ -257,6 +258,8 @@ public partial class MainWindow : Window
         SourceBox.SelectedItem = items.First(i => i.Process == _settings.WindowProcess);
     }
 
+    private const string DefaultGame = "Arma 3";
+
     /// <summary>Game profiles shipped in games/ next to the app, plus a previously chosen file elsewhere.</summary>
     private void LoadGames()
     {
@@ -268,7 +271,7 @@ public partial class MainWindow : Window
                 try
                 {
                     var profile = GameProfile.Load(file);
-                    items.Add(new GameItem(profile.GameTitle, file, profile.WindowProcess));
+                    items.Add(new GameItem(profile.GameTitle, file, profile.WindowProcess, profile.GameTitle));
                 }
                 catch (Exception e) when (e is IOException or FormatException or System.Text.Json.JsonException)
                 {
@@ -277,9 +280,20 @@ public partial class MainWindow : Window
                 }
             }
         if (_settings.GameProfile is string saved && File.Exists(saved) && !items.Any(i => i.Path == saved))
-            items.Add(new GameItem(Path.GetFileNameWithoutExtension(saved), saved));
+        {
+            string? game = null;
+            try
+            {
+                game = GameProfile.Load(saved).GameTitle;
+            }
+            catch (Exception e) when (e is IOException or FormatException or System.Text.Json.JsonException)
+            {
+            }
+            items.Add(new GameItem(Path.GetFileNameWithoutExtension(saved), saved, Game: game));
+        }
         GameBox.ItemsSource = items;
-        GameBox.SelectedItem = items.FirstOrDefault(i => i.Path == _settings.GameProfile) ?? items[0];
+        // Arma 3 until the player picks another game: a room opened without thinking of it still records the right profile.
+        GameBox.SelectedItem = items.FirstOrDefault(i => i.Path == _settings.GameProfile) ?? items.FirstOrDefault(i => i.Game == DefaultGame) ?? items[0];
     }
 
     private void SaveSettings()
@@ -396,7 +410,7 @@ public partial class MainWindow : Window
         CreateButton.Content = inRoom ? _t.CloseRoom : _t.CreateRoom;
         CreateButton.IsEnabled = idle || inRoom && _agent!.IsHost;
         CreateButton.Visibility = inRoom && !_agent!.IsHost ? Visibility.Collapsed : Visibility.Visible;
-        // In a room the orchestrator's game profile and frame rate apply.
+        // In a room the host's game (chosen here before opening it) and the orchestrator's frame rate apply.
         GameLabel.Visibility = GameBox.Visibility = FpsLabel.Visibility = FpsBox.Visibility = inRoom ? Visibility.Collapsed : Visibility.Visible;
         RefreshButton.IsEnabled = idle;
         _tray.Text = idle ? "Odx Capture" : _t.TrayTooltip(_trayStartStop.Text);
@@ -630,7 +644,7 @@ public partial class MainWindow : Window
         }
         var room = new RoomSession(new AgentOptions(orchestrator, _settings.PlayerId, _settings.PlayerName, PackageFolders.Captures,
             _settings.WindowProcess, RoomCode: code, CreateRoom: code is null, AccessKey: _config.AccessKey, Lan: lan,
-            TimeServer: _config.TimeServer),
+            TimeServer: _config.TimeServer, Game: code is null ? (GameBox.SelectedItem as GameItem)?.Game : null),
             StartAgentCapture, _packets.GetAsync, _log, _settings.RecordAudio && !_settings.RecordWithObs);
         var agent = room.Agent;
         agent.Countdown += (ms, cancelled) => Dispatcher.BeginInvoke(() => ShowAgentCountdown(ms, cancelled));
@@ -785,7 +799,7 @@ public partial class MainWindow : Window
         var clock = session.Agent.Clock;
         bool clockOff = _config.TimeServer is not null && clock is { Ok: false, NtpError: null };
         SyncClockButton.Visibility = clockOff && !_syncingClock ? Visibility.Visible : Visibility.Collapsed;
-        SetStatus(t => t.RoomStatus(room.Code, host, members) + (round is null ? "" : "\n" + round(t)) +
+        SetStatus(t => t.RoomStatus(room.Code, room.Game, host, members) + (round is null ? "" : "\n" + round(t)) +
                        (_config.TimeServer is null ? "" : "\n" + (_syncingClock ? t.ClockSyncing : t.ClockLine(clock))) +
                        (session.Agent.Capture is { } capture ? "\n" + t.CaptureLine(capture) +
                                                                (capture.Audio is { } audio ? "\n" + t.AudioLine(audio) : "") : "") +

@@ -20,7 +20,8 @@ public sealed partial class MatchCoordinator
             foreach (var r in _store.OpenRooms())
             {
                 var room = new Room(r.Code, r.Host, r.Server)
-                    { LanNetworkId = r.LanNetworkId, MatchId = r.MatchId, Map = r.Map, Game = r.Game, RoundNumber = r.RoundNumber };
+                    // Rooms from before protocol 5 have no game until their first match: they play the default.
+                    { LanNetworkId = r.LanNetworkId, MatchId = r.MatchId, Map = r.Map, Game = r.Game is "" ? _defaultGame : r.Game, RoundNumber = r.RoundNumber };
                 room.BetweenRounds.AddRange(r.BetweenRounds);
                 _rooms[room.Code] = room;
             }
