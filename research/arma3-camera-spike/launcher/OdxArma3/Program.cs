@@ -75,15 +75,17 @@ static class Program
         var missions = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Arma 3", "MPMissions");
         Directory.CreateDirectory(missions);
         var assembly = Assembly.GetExecutingAssembly();
-        foreach (var mission in assembly.GetManifestResourceNames().Where(n => n.StartsWith("mission/")).GroupBy(n => n.Split('/')[1]))
+        // MSBuild's %(RecursiveDir) puts a backslash after the mission folder when built on Windows, a slash elsewhere.
+        var resources = assembly.GetManifestResourceNames().Where(n => n.StartsWith("mission/"))
+            .Select(n => (Resource: n, Path: n.Substring("mission/".Length).Replace('\\', '/')));
+        foreach (var mission in resources.GroupBy(r => r.Path.Substring(0, r.Path.IndexOf('/'))))
         {
-            string prefix = "mission/" + mission.Key + "/";
-            var files = mission.OrderBy(n => n, StringComparer.Ordinal).Select(n =>
+            var files = mission.OrderBy(r => r.Path, StringComparer.Ordinal).Select(r =>
             {
-                using var source = assembly.GetManifestResourceStream(n)!;
+                using var source = assembly.GetManifestResourceStream(r.Resource)!;
                 using var bytes = new MemoryStream();
                 source.CopyTo(bytes);
-                return (Name: n.Substring(prefix.Length).Replace('/', '\\'), Data: bytes.ToArray());
+                return (Name: r.Path.Substring(mission.Key.Length + 1).Replace('/', '\\'), Data: bytes.ToArray());
             }).ToList();
             string unpacked = Path.Combine(missions, mission.Key);
             if (Directory.Exists(unpacked)) Directory.Delete(unpacked, recursive: true);
