@@ -47,4 +47,4 @@ jobs:
         run: |
           gh release create "eskimo-arma3-v$env:VERSION" research/arma3-camera-spike/launcher/OdxArma3Eskimo/bin/Release/net48/OdxArma3Eskimo.exe `
             --target $env:GITHUB_SHA --latest=false --title "Eskimo Arma 3 $env:VERSION" `
-            --notes "Built from $($env:GITHUB_SHA.Substring(0,7)). OdxArma3 launcher + Eskimo tweaks (god mode, infinite ammo, no HUD). Private Odx/Eskimo servers only, BattlEye off. Guide: research/arma3-camera-spike/launcher/OdxArma3Eskimo/HUONG-DAN.md"
+            --notes "Built from $($env:GITHUB_SHA.Substring(0,7)). OdxArma3 launcher + Eskimo tweaks (god mode, infinite magazines, no HUD). Private Odx/Eskimo servers only, BattlEye off. Guide: research/arma3-camera-spike/launcher/OdxArma3Eskimo/HUONG-DAN.md"
