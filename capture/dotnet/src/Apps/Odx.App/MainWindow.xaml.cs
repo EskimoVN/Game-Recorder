@@ -38,6 +38,9 @@ public partial class MainWindow : Window
     private const int WH_KEYBOARD_LL = 13;
     private const int WM_KEYDOWN = 0x0100, WM_SYSKEYDOWN = 0x0104, WM_KEYUP = 0x0101, WM_SYSKEYUP = 0x0105;
     private const int CountdownSeconds = 3;
+    /// <summary>Eskimo: rounds are about 4 minutes; the recording stops itself here, after a 5-4-3-2-1.</summary>
+    private static readonly TimeSpan AutoStopAfter = TimeSpan.FromMinutes(4);
+    private const int AutoStopWarnSeconds = 5;
     private const int MaxVideosPerBatch = 15;
     private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
 
@@ -52,9 +55,13 @@ public partial class MainWindow : Window
     private DateTime? _recordFrom;
     /// <summary>The task ID the host asked a round to start with; the video number advances once the room shows it started.</summary>
     private string? _pendingTask;
+    private CountdownOverlay? _autoStopOverlay;
+    /// <summary>Sent once, like one hotkey press: a resend after the round ended would start a new round. A failed send
+    /// shows RoundToggleFailed and the host presses the hotkey.</summary>
+    private bool _autoStopSent;
     private static readonly System.Windows.Media.SolidColorBrush
         RecordTimerRunning = new(System.Windows.Media.Color.FromRgb(0xF2, 0x54, 0x50)),
-        RecordTimerStopped = new(System.Windows.Media.Color.FromRgb(0x8A, 0x91, 0xA0));
+        RecordTimerStopped = new(System.Windows.Media.Color.FromRgb(0x9A, 0x90, 0xA3));
     private readonly Forms.NotifyIcon _tray = new();
     private readonly Forms.ToolStripMenuItem _trayStartStop = new(), _trayShow = new(), _trayExit = new();
     private Strings _t = Strings.En;
@@ -123,7 +130,11 @@ public partial class MainWindow : Window
         Loaded += async (_, _) => await RefreshWindowsAsync();
         Loaded += async (_, _) => await CheckEncoderAsync();
         _clock.Tick += (_, _) => ShowRecordingStatus();
-        _recordTimer.Tick += (_, _) => ShowRecordTimer();
+        _recordTimer.Tick += (_, _) =>
+        {
+            ShowRecordTimer();
+            CheckAutoStop();
+        };
 
         _trayStartStop.Click += (_, _) => Toggle();
         using (var icon = System.Windows.Application.GetResourceStream(new Uri("pack://application:,,,/odx.ico")).Stream)
@@ -564,6 +575,8 @@ public partial class MainWindow : Window
     private void StartRecordTimer(DateTime from)
     {
         _recordFrom = from;
+        _autoStopSent = false;
+        CloseAutoStopOverlay();
         ShowRecordTimer();
         _recordTimer.Start();
     }
@@ -571,6 +584,7 @@ public partial class MainWindow : Window
     /// <summary>Freezes the recording time where it is; it stays shown until the next recording.</summary>
     private void StopRecordTimer()
     {
+        CloseAutoStopOverlay();
         if (_recordFrom is null) return;
         _recordTimer.Stop();
         ShowRecordTimer();
@@ -584,10 +598,56 @@ public partial class MainWindow : Window
         if (_recordFrom is not { } from) return;
         var elapsed = DateTime.Now - from;
         RecordTimerText.Text = FormatRecordTime(elapsed);
+        ShowSkewer(elapsed);
         // Red with the dot once it counts; grey at 00:00:00 during a room's 3-2-1.
         bool counting = elapsed >= TimeSpan.Zero;
         RecordTimerDot.Visibility = counting ? Visibility.Visible : Visibility.Hidden;
         RecordTimerText.Foreground = counting ? RecordTimerRunning : RecordTimerStopped;
+    }
+
+    /// <summary>The skewer fills towards <see cref="AutoStopAfter"/>; each dango fills over its third of the round.</summary>
+    private void ShowSkewer(TimeSpan elapsed)
+    {
+        double done = Math.Clamp(elapsed / AutoStopAfter, 0, 1);
+        SkewerFill.Width = SkewerTrack.Width * done;
+        SkewerDango1.Opacity = Math.Clamp(done * 3, 0, 1);
+        SkewerDango2.Opacity = Math.Clamp(done * 3 - 1, 0, 1);
+        SkewerDango3.Opacity = Math.Clamp(done * 3 - 2, 0, 1);
+    }
+
+    /// <summary>
+    /// 5-4-3-2-1 on screen before <see cref="AutoStopAfter"/>, then the same stop as the hotkey: solo, the capture
+    /// stops; in a room, only the host ends the round (for everyone, as with F10). Players just see the countdown.
+    /// </summary>
+    private void CheckAutoStop()
+    {
+        if (_recordFrom is not { } from) return;
+        var left = AutoStopAfter - (DateTime.Now - from);
+        if (left > TimeSpan.FromSeconds(AutoStopWarnSeconds)) return;
+        if (left > TimeSpan.Zero)
+        {
+            if (_autoStopSent) return;
+            if (_autoStopOverlay is null)
+            {
+                _autoStopOverlay = new CountdownOverlay();
+                _autoStopOverlay.Show();
+            }
+            _autoStopOverlay.Seconds = (int)Math.Ceiling(left.TotalSeconds);
+            return;
+        }
+        CloseAutoStopOverlay();
+        if (_autoStopSent) return;
+        _autoStopSent = true;
+        if ((_state is RunState.Starting or RunState.Recording) && _run is not null)
+            StopRecording();
+        else if (_state == RunState.Agent && _agent is { IsHost: true, Room.CurrentSession: not null })
+            ToggleRound();
+    }
+
+    private void CloseAutoStopOverlay()
+    {
+        _autoStopOverlay?.Close();
+        _autoStopOverlay = null;
     }
 
     private static string FormatRecordTime(TimeSpan elapsed)

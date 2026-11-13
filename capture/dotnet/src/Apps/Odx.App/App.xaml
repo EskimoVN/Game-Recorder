@@ -4,14 +4,14 @@
     <!-- Dark theme (team Dango). Rose = brand, focus and checked states; matcha = the one main action and success;
          red = recording and errors only. Text on cards is WCAG AA or more over the dark background image. -->
     <Application.Resources>
-        <SolidColorBrush x:Key="VoidBrush" Color="#0B0D12" />
-        <SolidColorBrush x:Key="HeaderBrush" Color="#D90B0D12" />
-        <SolidColorBrush x:Key="CardBrush" Color="#CC12151C" />
-        <SolidColorBrush x:Key="SurfaceBrush" Color="#14171F" />
-        <SolidColorBrush x:Key="PopupBrush" Color="#171A22" />
-        <SolidColorBrush x:Key="PopupLineBrush" Color="#2E3340" />
-        <SolidColorBrush x:Key="GlassBrush" Color="#F012151C" />
-        <SolidColorBrush x:Key="OverlayGlassBrush" Color="#E00B0D12" />
+        <SolidColorBrush x:Key="VoidBrush" Color="#120E18" />
+        <SolidColorBrush x:Key="HeaderBrush" Color="#D9120E18" />
+        <SolidColorBrush x:Key="CardBrush" Color="#C41A1522" />
+        <SolidColorBrush x:Key="SurfaceBrush" Color="#1A1522" />
+        <SolidColorBrush x:Key="PopupBrush" Color="#1E1828" />
+        <SolidColorBrush x:Key="PopupLineBrush" Color="#3A2F45" />
+        <SolidColorBrush x:Key="GlassBrush" Color="#F01A1522" />
+        <SolidColorBrush x:Key="OverlayGlassBrush" Color="#E0120E18" />
         <SolidColorBrush x:Key="HairlineBrush" Color="#1FFFFFFF" />
         <SolidColorBrush x:Key="SheenBrush" Color="#14FFFFFF" />
         <LinearGradientBrush x:Key="CardLineBrush" StartPoint="0,0" EndPoint="0,1">
@@ -20,22 +20,22 @@
             <GradientStop Color="#0DFFFFFF" Offset="1" />
         </LinearGradientBrush>
 
-        <SolidColorBrush x:Key="TextBrush" Color="#ECEEF3" />
-        <SolidColorBrush x:Key="TextSecondaryBrush" Color="#A9AFBC" />
-        <SolidColorBrush x:Key="TextMutedBrush" Color="#8A91A0" />
-        <SolidColorBrush x:Key="TextDisabledBrush" Color="#6A7080" />
+        <SolidColorBrush x:Key="TextBrush" Color="#F3EEF4" />
+        <SolidColorBrush x:Key="TextSecondaryBrush" Color="#BDB3C2" />
+        <SolidColorBrush x:Key="TextMutedBrush" Color="#9A90A3" />
+        <SolidColorBrush x:Key="TextDisabledBrush" Color="#6E6578" />
 
-        <SolidColorBrush x:Key="InputBrush" Color="#0A0C10" />
-        <SolidColorBrush x:Key="InputLineBrush" Color="#5C6475" />
-        <SolidColorBrush x:Key="InputHoverLineBrush" Color="#7A8294" />
-        <SolidColorBrush x:Key="ButtonBrush" Color="#1D212A" />
-        <SolidColorBrush x:Key="ButtonHoverBrush" Color="#262B36" />
-        <SolidColorBrush x:Key="ButtonPressedBrush" Color="#161920" />
-        <SolidColorBrush x:Key="ButtonLineBrush" Color="#3A404D" />
-        <SolidColorBrush x:Key="HighlightBrush" Color="#232835" />
-        <SolidColorBrush x:Key="DisabledBrush" Color="#15181E" />
-        <SolidColorBrush x:Key="DisabledLineBrush" Color="#2A2F3A" />
-        <SolidColorBrush x:Key="ScrollThumbBrush" Color="#3A404D" />
+        <SolidColorBrush x:Key="InputBrush" Color="#120E18" />
+        <SolidColorBrush x:Key="InputLineBrush" Color="#5E5068" />
+        <SolidColorBrush x:Key="InputHoverLineBrush" Color="#8A7896" />
+        <SolidColorBrush x:Key="ButtonBrush" Color="#261F2E" />
+        <SolidColorBrush x:Key="ButtonHoverBrush" Color="#312839" />
+        <SolidColorBrush x:Key="ButtonPressedBrush" Color="#1D1824" />
+        <SolidColorBrush x:Key="ButtonLineBrush" Color="#45394F" />
+        <SolidColorBrush x:Key="HighlightBrush" Color="#2E2438" />
+        <SolidColorBrush x:Key="DisabledBrush" Color="#1A1520" />
+        <SolidColorBrush x:Key="DisabledLineBrush" Color="#2E2636" />
+        <SolidColorBrush x:Key="ScrollThumbBrush" Color="#45394F" />
 
         <SolidColorBrush x:Key="AccentBrush" Color="#E46A92" />
         <SolidColorBrush x:Key="AccentHoverBrush" Color="#EC86A8" />
@@ -92,6 +92,9 @@
         <!-- bg.jpg is a <Resource> in the csproj: a missing pack resource fails at startup. -->
         <ImageBrush x:Key="BackdropBrush" ImageSource="pack://application:,,,/bg.jpg"
                     Stretch="UniformToFill" AlignmentX="Right" AlignmentY="Top" />
+        <!-- header.png: the dango skewer sits in the right quarter, so nothing is placed there. -->
+        <ImageBrush x:Key="HeaderArtBrush" ImageSource="pack://application:,,,/header.png"
+                    Stretch="UniformToFill" AlignmentX="Right" AlignmentY="Center" />
 
         <!-- Keyboard-only focus ring, drawn outside the control so it never hides content. -->
         <Style x:Key="FocusRing">
@@ -119,11 +122,30 @@
             <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
         </Style>
 
+        <LinearGradientBrush x:Key="SakuraCardLineBrush" StartPoint="0,0" EndPoint="0.35,1">
+            <GradientStop Color="#99F2A7BE" Offset="0" />
+            <GradientStop Color="#1FFFFFFF" Offset="0.3" />
+            <GradientStop Color="#0DFFFFFF" Offset="1" />
+        </LinearGradientBrush>
+        <LinearGradientBrush x:Key="ShiroCardLineBrush" StartPoint="0,0" EndPoint="0.35,1">
+            <GradientStop Color="#8CF3E9D2" Offset="0" />
+            <GradientStop Color="#1FFFFFFF" Offset="0.3" />
+            <GradientStop Color="#0DFFFFFF" Offset="1" />
+        </LinearGradientBrush>
+        <LinearGradientBrush x:Key="MatchaCardLineBrush" StartPoint="0,0" EndPoint="0.35,1">
+            <GradientStop Color="#998CC79A" Offset="0" />
+            <GradientStop Color="#1FFFFFFF" Offset="0.3" />
+            <GradientStop Color="#0DFFFFFF" Offset="1" />
+        </LinearGradientBrush>
+        <SolidColorBrush x:Key="SkewerWoodBrush" Color="#C9A27A" />
+        <SolidColorBrush x:Key="SkewerTrackBrush" Color="#3A2F45" />
+        <SolidColorBrush x:Key="HoverGlowBrush" Color="#14FFFFFF" />
+
         <Style x:Key="Card" TargetType="Border">
             <Setter Property="Background" Value="{StaticResource CardBrush}" />
             <Setter Property="BorderBrush" Value="{StaticResource CardLineBrush}" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="12" />
+            <Setter Property="CornerRadius" Value="14" />
             <Setter Property="Padding" Value="16,12,16,6" />
             <Setter Property="Margin" Value="0,0,0,10" />
             <Setter Property="SnapsToDevicePixels" Value="True" />
@@ -255,10 +277,12 @@
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
                         <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="6"
+                                BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="8"
                                 SnapsToDevicePixels="True">
                             <Grid>
-                                <Border x:Name="Sheen" CornerRadius="5" BorderThickness="0,1,0,0"
+                                <Border x:Name="HoverGlow" CornerRadius="7" Background="{StaticResource HoverGlowBrush}"
+                                        Opacity="0" IsHitTestVisible="False" />
+                                <Border x:Name="Sheen" CornerRadius="7" BorderThickness="0,1,0,0"
                                         BorderBrush="{StaticResource SheenBrush}" IsHitTestVisible="False" />
                                 <ContentPresenter Margin="{TemplateBinding Padding}" RecognizesAccessKey="True"
                                                   HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
@@ -266,11 +290,30 @@
                             </Grid>
                         </Border>
                         <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="HoverGlow" Storyboard.TargetProperty="Opacity"
+                                                             To="1" Duration="0:0:0.15" />
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.EnterActions>
+                                <Trigger.ExitActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="HoverGlow" Storyboard.TargetProperty="Opacity"
+                                                             To="0" Duration="0:0:0.2" />
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.ExitActions>
+                            </Trigger>
                             <Trigger Property="IsPressed" Value="True">
                                 <Setter TargetName="Sheen" Property="Visibility" Value="Collapsed" />
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter TargetName="Sheen" Property="Visibility" Value="Collapsed" />
+                                <Setter TargetName="HoverGlow" Property="Visibility" Value="Collapsed" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -294,6 +337,50 @@
 
         <!-- The disabled trigger is repeated last so it wins over this style's own colours. -->
         <Style x:Key="PrimaryButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="12" SnapsToDevicePixels="True">
+                            <Grid>
+                                <Border x:Name="HoverGlow" CornerRadius="11" Background="#1FFFFFFF" Opacity="0" IsHitTestVisible="False" />
+                                <Border x:Name="Sheen" CornerRadius="11" BorderThickness="0,1,0,0" BorderBrush="#40FFFFFF"
+                                        IsHitTestVisible="False" />
+                                <ContentPresenter Margin="{TemplateBinding Padding}" RecognizesAccessKey="True"
+                                                  HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                                  VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="HoverGlow" Storyboard.TargetProperty="Opacity"
+                                                             To="1" Duration="0:0:0.15" />
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.EnterActions>
+                                <Trigger.ExitActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="HoverGlow" Storyboard.TargetProperty="Opacity"
+                                                             To="0" Duration="0:0:0.2" />
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.ExitActions>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Sheen" Property="Visibility" Value="Collapsed" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Sheen" Property="Visibility" Value="Collapsed" />
+                                <Setter TargetName="HoverGlow" Property="Visibility" Value="Collapsed" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
             <Setter Property="Background" Value="{StaticResource MatchaGradientBrush}" />
             <Setter Property="BorderBrush" Value="{StaticResource MatchaGradientPressedBrush}" />
             <Setter Property="Foreground" Value="{StaticResource MatchaDeepInkBrush}" />
@@ -348,7 +435,7 @@
                 <Setter.Value>
                     <ControlTemplate TargetType="TextBox">
                         <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="6"
+                                BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="8"
                                 Padding="{TemplateBinding Padding}" SnapsToDevicePixels="True">
                             <ScrollViewer x:Name="PART_ContentHost" Focusable="False"
                                           HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Hidden"
@@ -366,7 +453,7 @@
                 <Setter.Value>
                     <ControlTemplate TargetType="PasswordBox">
                         <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="6"
+                                BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="8"
                                 Padding="{TemplateBinding Padding}" SnapsToDevicePixels="True">
                             <ScrollViewer x:Name="PART_ContentHost" Focusable="False"
                                           HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Hidden"
@@ -379,7 +466,7 @@
 
         <ControlTemplate x:Key="ComboToggleTemplate" TargetType="ToggleButton">
             <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
-                    BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="6" SnapsToDevicePixels="True">
+                    BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="8" SnapsToDevicePixels="True">
                 <Path x:Name="Arrow" Width="10" Height="6" Margin="0,1,6,0" HorizontalAlignment="Right"
                       VerticalAlignment="Center" Data="M1,1 L5,5 L9,1" StrokeThickness="1.5"
                       StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"

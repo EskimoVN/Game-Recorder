@@ -6,25 +6,15 @@
     <!-- Texts come from Strings (English / Vietnamese), set in code-behind. -->
     <Grid Background="{StaticResource BackdropBrush}" RenderOptions.BitmapScalingMode="HighQuality">
         <DockPanel>
-            <Border DockPanel.Dock="Top" Background="{StaticResource HeaderBrush}"
-                    BorderBrush="{StaticResource HairlineBrush}" BorderThickness="0,0,0,1" Padding="16,12">
-                <DockPanel>
+            <Border DockPanel.Dock="Top" Height="76" Background="{StaticResource HeaderArtBrush}" Padding="18,0">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock VerticalAlignment="Center" FontSize="19"><Run Text="Odx" FontFamily="Bahnschrift SemiBold, Segoe UI Semibold" /><Run Text=" Capture" Foreground="{StaticResource TextSecondaryBrush}" /></TextBlock>
                     <!-- The build's version (without the commit), so a screenshot tells which package a player runs. -->
-                    <Border DockPanel.Dock="Right" CornerRadius="10" Padding="9,2" BorderThickness="1" VerticalAlignment="Center"
-                            BorderBrush="{StaticResource HairlineBrush}">
+                    <Border CornerRadius="10" Padding="9,2" Margin="12,0,0,0" BorderThickness="1" VerticalAlignment="Center"
+                            BorderBrush="{StaticResource HairlineBrush}" Background="#33000000">
                         <TextBlock x:Name="VersionText" FontSize="11" Foreground="{StaticResource TextMutedBrush}" />
                     </Border>
-                    <StackPanel Orientation="Horizontal">
-                        <!-- Decorative mark: three dango on a skewer in the theme colours. -->
-                        <Canvas Width="42" Height="12" Margin="0,0,12,0" VerticalAlignment="Center" IsHitTestVisible="False">
-                            <Rectangle Canvas.Top="5.5" Width="42" Height="1.5" Fill="#6B5A45" />
-                            <Ellipse Canvas.Left="0" Width="12" Height="12" Fill="{StaticResource SakuraBrush}" />
-                            <Ellipse Canvas.Left="13" Width="12" Height="12" Fill="{StaticResource ShiroBrush}" />
-                            <Ellipse Canvas.Left="26" Width="12" Height="12" Fill="{StaticResource MatchaSoftBrush}" />
-                        </Canvas>
-                        <TextBlock VerticalAlignment="Center" FontSize="16"><Run Text="Odx" FontFamily="Bahnschrift SemiBold, Segoe UI Semibold" /><Run Text=" Capture" Foreground="{StaticResource TextSecondaryBrush}" /></TextBlock>
-                    </StackPanel>
-                </DockPanel>
+                </StackPanel>
             </Border>
 
             <!-- Capture and Room cards share one label column width (SharedSizeGroup) so their fields line up. -->
@@ -39,7 +29,7 @@
                     </Style>
                 </StackPanel.Resources>
 
-                <Border Style="{StaticResource Card}">
+                <Border Style="{StaticResource Card}" BorderBrush="{StaticResource SakuraCardLineBrush}">
                     <StackPanel>
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
                         <Ellipse Style="{StaticResource SectionDot}" Fill="{StaticResource SakuraBrush}" />
@@ -104,7 +94,8 @@
                 </Border>
 
                 <!-- Room card: follows RoomPanel, which the code hides when odx-capture.json names no orchestrator. -->
-                <Border Style="{StaticResource Card}" Visibility="{Binding Visibility, ElementName=RoomPanel}">
+                <Border Style="{StaticResource Card}" BorderBrush="{StaticResource ShiroCardLineBrush}"
+                        Visibility="{Binding Visibility, ElementName=RoomPanel}">
                     <StackPanel>
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
                         <Ellipse Style="{StaticResource SectionDot}" Fill="{StaticResource ShiroBrush}" />
@@ -163,7 +154,7 @@
                     </StackPanel>
                 </Border>
 
-                <Border Style="{StaticResource Card}" Margin="0">
+                <Border Style="{StaticResource Card}" BorderBrush="{StaticResource MatchaCardLineBrush}" Margin="0">
                     <StackPanel>
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
                         <!-- Matcha while idle, red while the recording timer runs. -->
@@ -201,8 +192,29 @@
                                  PreviewKeyDown="Hotkey_PreviewKeyDown" />
 
                         <!-- Turns solid red while the recording timer runs (its dot is shown), so the stop state reads at a glance. -->
-                        <Button x:Name="StartStopButton" AutomationProperties.AutomationId="StartStopButton" Grid.Row="1"
-                                Grid.ColumnSpan="2" Margin="0,4,0,0" Padding="12,12" MinHeight="46" FontSize="15"
+                        <Grid Grid.Row="1" Grid.ColumnSpan="2" Margin="0,4,0,0">
+                        <Border CornerRadius="12" Margin="14,10,14,-4" IsHitTestVisible="False">
+                            <Border.Effect>
+                                <BlurEffect Radius="18" />
+                            </Border.Effect>
+                            <Border.Style>
+                                <Style TargetType="Border">
+                                    <Setter Property="Background" Value="{StaticResource MatchaSoftBrush}" />
+                                    <Setter Property="Opacity" Value="0.35" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Visibility, ElementName=RecordTimerDot}" Value="Visible">
+                                            <Setter Property="Background" Value="{StaticResource RecordBrush}" />
+                                            <Setter Property="Opacity" Value="0.45" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding IsEnabled, ElementName=StartStopButton}" Value="False">
+                                            <Setter Property="Opacity" Value="0" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Border.Style>
+                        </Border>
+                        <Button x:Name="StartStopButton" AutomationProperties.AutomationId="StartStopButton"
+                                Padding="12,12" MinHeight="46" FontSize="15"
                                 Click="StartStop_Click">
                             <Button.Style>
                                 <Style TargetType="Button" BasedOn="{StaticResource PrimaryButton}">
@@ -235,11 +247,35 @@
                                 </Style>
                             </Button.Style>
                         </Button>
+                        </Grid>
 
                         <!-- Recording time: red with a dot while it runs, grey once stopped (keeps the last recording's length).
                              The dot is Hidden, not Collapsed, so the digits do not shift when it appears. -->
-                        <StackPanel x:Name="RecordTimerPanel" Grid.Row="2" Grid.ColumnSpan="2" Orientation="Horizontal"
-                                    HorizontalAlignment="Left" Margin="0,12,0,4">
+                        <DockPanel Grid.Row="2" Grid.ColumnSpan="2" Margin="0,12,0,4" LastChildFill="False">
+                        <!-- Eskimo: the round's 4 minutes as a skewer, one dango per 80 s; the recording stops itself at the last. -->
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                            <Canvas Width="148" Height="16" IsHitTestVisible="False">
+                                <Rectangle x:Name="SkewerTrack" Canvas.Top="7" Width="140" Height="2" RadiusX="1" RadiusY="1"
+                                           Fill="{StaticResource SkewerTrackBrush}" />
+                                <Rectangle x:Name="SkewerFill" Canvas.Top="7" Width="0" Height="2" RadiusX="1" RadiusY="1"
+                                           Fill="{StaticResource SkewerWoodBrush}" />
+                                <Ellipse Canvas.Left="39.7" Canvas.Top="1" Width="14" Height="14" StrokeThickness="1.5"
+                                         Stroke="{StaticResource SakuraBrush}" Opacity="0.45" Fill="{StaticResource CardBrush}" />
+                                <Ellipse x:Name="SkewerDango1" Canvas.Left="39.7" Canvas.Top="1" Width="14" Height="14"
+                                         Fill="{StaticResource SakuraBrush}" Opacity="0" />
+                                <Ellipse Canvas.Left="86.3" Canvas.Top="1" Width="14" Height="14" StrokeThickness="1.5"
+                                         Stroke="{StaticResource ShiroBrush}" Opacity="0.45" Fill="{StaticResource CardBrush}" />
+                                <Ellipse x:Name="SkewerDango2" Canvas.Left="86.3" Canvas.Top="1" Width="14" Height="14"
+                                         Fill="{StaticResource ShiroBrush}" Opacity="0" />
+                                <Ellipse Canvas.Left="133" Canvas.Top="1" Width="14" Height="14" StrokeThickness="1.5"
+                                         Stroke="{StaticResource MatchaSoftBrush}" Opacity="0.45" Fill="{StaticResource CardBrush}" />
+                                <Ellipse x:Name="SkewerDango3" Canvas.Left="133" Canvas.Top="1" Width="14" Height="14"
+                                         Fill="{StaticResource MatchaSoftBrush}" Opacity="0" />
+                            </Canvas>
+                            <TextBlock Text="04:00" FontFamily="Consolas" FontSize="11" Margin="8,0,0,0" VerticalAlignment="Center"
+                                       Foreground="{StaticResource TextMutedBrush}" />
+                        </StackPanel>
+                        <StackPanel x:Name="RecordTimerPanel" DockPanel.Dock="Left" Orientation="Horizontal">
                             <Ellipse x:Name="RecordTimerDot" Width="12" Height="12" Fill="{StaticResource RecordBrush}"
                                      Margin="2,0,10,0" VerticalAlignment="Center" Visibility="Hidden" />
                             <TextBlock x:Name="RecordTimerText" AutomationProperties.AutomationId="RecordTimerText" Text="00:00:00"
@@ -252,6 +288,7 @@
                                 <TextBlock Text="REC" FontSize="11" FontWeight="Bold" Foreground="White" />
                             </Border>
                         </StackPanel>
+                        </DockPanel>
 
                         <TextBlock x:Name="StatusText" AutomationProperties.AutomationId="StatusText" Grid.Row="3"
                                    Grid.ColumnSpan="2" TextWrapping="Wrap" Margin="0,4,0,8" />
