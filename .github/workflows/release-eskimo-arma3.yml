@@ -1,7 +1,7 @@
 name: Release Eskimo Arma 3 launcher
 
 # Builds OdxArma3Eskimo.exe (the company's OdxArma3 launcher compiled unchanged + the eskimo_tweaks addon: god mode,
-# infinite ammo, no HUD) and attaches it to a GitHub release eskimo-arma3-v<version>. Start it by pushing a tag
+# infinite magazines, no HUD) and attaches it to a GitHub release eskimo-arma3-v<version>. Start it by pushing a tag
 # eskimo-arma3-v0.1.0, or by hand (Actions -> Release Eskimo Arma 3 launcher -> Run workflow). Mirrors release-arma3.yml.
 
 on:

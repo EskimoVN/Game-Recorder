@@ -1,4 +1,4 @@
-// Eskimo capture tweaks for the local player: god mode, infinite ammo, no HUD. Only on Odx/Eskimo private play
+// Eskimo capture tweaks for the local player: god mode, infinite magazines, no HUD. Only on Odx/Eskimo private play
 // (single player, this machine hosting, or a server whose name starts with "Eskimo"); never on other servers, the
 // company's Odx servers included: their rules stay as the company set them.
 // The HUD itself is the company addon's (odx_capture ODX_fnc_hideHud, showHUD all off, applied at start and after a
@@ -34,10 +34,18 @@ if (!hasInterface) exitWith {};
                 player setVariable ["eskimo_ammo", player addEventHandler ["FiredMan", {
                     params ["_unit", "_weapon", "", "", "", "_magazine", "", "_vehicle"];
                     if (!isNull _vehicle) exitWith { if (local _vehicle) then { _vehicle setVehicleAmmo 1; }; };
-                    if (_weapon in ["Throw", "Put"]) exitWith { _unit addMagazine _magazine; };
-                    _unit setVehicleAmmo 1;
+                    if (_weapon in ["Throw", "Put"]) then { _unit addMagazine _magazine; };
+                }]];
+                // Infinite magazines, not infinite rounds: the magazine empties and is reloaded as usual, and each reload
+                // puts a full one of the same type back in the inventory, so the count never goes down.
+                player setVariable ["eskimo_mags", player addEventHandler ["Reloaded", {
+                    params ["_unit", "", "", "_new"];
+                    _unit addMagazine (if (_new isEqualType []) then { _new select 0 } else { _new });
                 }]];
             };
+            // Backstop when a full inventory refused that magazine: the weapon in hand always keeps one spare.
+            private _mag = currentMagazine player;
+            if (_mag != "" && {vehicle player == player} && {!(_mag in magazines player)}) then { player addMagazine _mag; };
         };
         showSubtitles false;
         sleep 1;
