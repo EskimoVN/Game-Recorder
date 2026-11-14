@@ -147,7 +147,7 @@ sealed class EskimoForm : Form
 
         Controls.Add(new Label
         {
-            Text = "God mode, infinite magazines, no HUD. Eskimo-hosted games only (server name starts with \"Eskimo\").",
+            Text = "God mode, infinite magazines, double stamina, no HUD. Eskimo-hosted games only (server name starts with \"Eskimo\").",
             Location = new Point(12, 150), Size = new Size(500, 20), ForeColor = Color.DimGray,
         });
 

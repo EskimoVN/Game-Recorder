@@ -1,4 +1,4 @@
-// Eskimo capture tweaks for the local player: god mode, infinite magazines, no HUD. Only on Odx/Eskimo private play
+// Eskimo capture tweaks for the local player: god mode, infinite magazines, double stamina, no HUD. Only on Odx/Eskimo private play
 // (single player, this machine hosting, or a server whose name starts with "Eskimo"); never on other servers, the
 // company's Odx servers included: their rules stay as the company set them.
 // The HUD itself is the company addon's (odx_capture ODX_fnc_hideHud, showHUD all off, applied at start and after a
@@ -46,6 +46,13 @@ if (!hasInterface) exitWith {};
             // Backstop when a full inventory refused that magazine: the weapon in hand always keeps one spare.
             private _mag = currentMagazine player;
             if (_mag != "" && {vehicle player == player} && {!(_mag in magazines player)}) then { player addMagazine _mag; };
+            // Double stamina: half of each second's drain is given back (runs last twice as long) and each second's
+            // recovery is added again (recovers twice as fast). Measured per unit, so a respawn starts fresh.
+            private _stamina = getStamina player;
+            private _change = _stamina - (player getVariable ["eskimo_stamina", _stamina]);
+            if (_change < 0) then { player setStamina (_stamina - _change / 2); };
+            if (_change > 0) then { player setStamina (_stamina + _change); };
+            player setVariable ["eskimo_stamina", getStamina player];
         };
         showSubtitles false;
         sleep 1;

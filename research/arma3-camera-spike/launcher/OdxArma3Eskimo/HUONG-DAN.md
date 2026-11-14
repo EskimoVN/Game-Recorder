@@ -35,6 +35,7 @@ Của công ty, có sẵn trong `@OdxCapture`:
 Của Eskimo, trong `@OdxEskimo`:
 - Bất tử với mọi mission, bật lại mỗi giây.
 - Vô hạn băng đạn: bắn hết thì thay đạn bình thường. Mỗi lần thay, kho đồ được thêm lại một băng cùng loại, nên không bao giờ hết băng. Lựu đạn, mìn được trả lại.
+- Thể lực gấp đôi: chạy nhanh lâu gấp đôi trước khi mệt, nghỉ thì hồi nhanh gấp đôi.
   Súng trên xe chỉ được nạp lại khi xe do máy mình điều khiển.
 - Ẩn lại HUD ở mọi khung hình, phòng khi mission bật HUD lên giữa trận.
 - Xoá thứ công ty chưa xoá: hint, tip, thông báo, khung chat, phụ đề.
