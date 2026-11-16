@@ -19,10 +19,12 @@ internal sealed class FfmpegEncoder : IDisposable
     public FfmpegEncoder(string ffmpeg, string output, int width, int height, double fps, string encoder)
     {
         Encoder = encoder;
+        // -maxrate/-bufsize cap the file at ~8 Mbps (VBV): a round's video stays small without touching the preset, so the
+        // GPU/CPU cost is unchanged (a game that saturates the GPU still encodes). Quality-mode mf keeps its own target.
         string codec = encoder switch
         {
-            "nvenc" => "-c:v h264_nvenc -preset p1 -rc vbr -cq 23 -bf 0 -g 120",  // p1: the fastest; a GPU the game saturates encodes slowly (Bảo, 2026-11-07)
-            "x264" => "-c:v libx264 -preset veryfast -crf 20 -bf 0 -g 120",
+            "nvenc" => "-c:v h264_nvenc -preset p1 -rc vbr -cq 23 -maxrate 8M -bufsize 16M -bf 0 -g 120",  // p1: the fastest; a GPU the game saturates encodes slowly (Bảo, 2026-11-07)
+            "x264" => "-c:v libx264 -preset veryfast -crf 20 -maxrate 8M -bufsize 16M -bf 0 -g 120",
             // Media Foundation's hardware H.264 encoder: Intel Quick Sync, AMD or NVIDIA, whichever GPU has one.
             "mf" => "-c:v h264_mf -hw_encoding 1 -rate_control quality -quality 70 -bf 0 -g 120",
             _ => throw new ArgumentException($"unknown encoder '{encoder}' (nvenc|mf|x264)"),
