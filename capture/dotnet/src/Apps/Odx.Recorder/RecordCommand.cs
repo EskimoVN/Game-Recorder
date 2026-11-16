@@ -62,7 +62,7 @@ public static class RecordCommand
         if (opts is null)
         {
             Console.Error.WriteLine("usage: odx record --out <dir> (--window <process name> | --monitor) [--fps 60] " +
-                                    "[--encoder auto|x264|nvenc|mf] [--ffmpeg <path>] [--cursor] [--audio [--audio-process <process name>]] [--obs <host:port>] [--source present] [--seconds N] [--stop-event <name>] [--grid-origin-qpc-ms <ms>] [--json-status] [--probe]");
+                                    "[--encoder auto|x264|nvenc|mf] [--ffmpeg <path>] [--cursor] [--audio [--audio-process <process name>]] [--obs <host:port>] [--source present|gfxcapture] [--seconds N] [--stop-event <name>] [--grid-origin-qpc-ms <ms>] [--json-status] [--probe]");
             return 2;
         }
         if (opts.Obs is string obs) return RunObs(opts, obs);
@@ -74,6 +74,7 @@ public static class RecordCommand
             presentFallback = fallback;  // the DLL produced no frame: Windows.Graphics.Capture records this round instead
             Console.Error.WriteLine($"present source unavailable, using Windows.Graphics.Capture: {fallback}");
         }
+        if (opts.Source == "gfxcapture") return RunGfxCapture(opts);
         if (!GraphicsCaptureSession.IsSupported())
         {
             Console.Error.WriteLine("Windows.Graphics.Capture is not supported on this system");
@@ -776,6 +777,147 @@ public static class RecordCommand
         return (error is null && ffmpegExit == 0 ? 0 : 1, null);
     }
 
+    // --source gfxcapture: ffmpeg captures the window on the GPU (gfxcapture, d3d11) and encodes it, so this process does no
+    // readback. Free-running (no grid origin): video_frames.csv is a plain CFR grid from the start; round-aligned capture is
+    // a later step (research/arma3-present-capture). Opt-in, separate from the default Windows.Graphics.Capture path.
+    private static int RunGfxCapture(Options opts)
+    {
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        if (opts.Window is not string processName)
+        {
+            Console.Error.WriteLine("--source gfxcapture needs --window <game process>");
+            return 2;
+        }
+        var proc = Process.GetProcessesByName(Path.GetFileNameWithoutExtension(processName))
+            .FirstOrDefault(p => p.MainWindowHandle != IntPtr.Zero);
+        if (proc is null)
+        {
+            Console.Error.WriteLine($"no window found for process '{processName}'");
+            return 1;
+        }
+        ulong hwnd = (ulong)proc.MainWindowHandle.ToInt64();
+        int pid = proc.Id;
+        var (screenWidth, screenHeight) = CaptureInterop.MonitorSize(CaptureInterop.MonitorOf(proc.MainWindowHandle));
+        Directory.CreateDirectory(opts.OutDir);
+        string encoder = EncoderChoice.Resolve(opts.Ffmpeg, opts.Encoder);
+        string source = $"gfxcapture:{Path.GetFileNameWithoutExtension(processName)}";
+        string raw = Path.Combine(opts.OutDir, VideoFinalize.RawVideo);
+        string fr = opts.Fps.ToString(inv);
+        int cursor = opts.Cursor ? 1 : 0;
+
+        // gfxcapture frames are d3d11 BGRA: download, convert to BT.601 limited NV12 (matching the rest of the pipeline), encode.
+        // width/height=-2: round the captured size down to an even number (H.264 needs even dimensions).
+        string filter = $"gfxcapture=hwnd={hwnd}:capture_cursor={cursor}:max_framerate={fr}:width=-2:height=-2," +
+                        "hwdownload,format=bgra,scale=out_range=tv:out_color_matrix=smpte170m,format=nv12";
+        string tArg = opts.Seconds is double secs ? $"-t {secs.ToString(inv)} " : "";
+        string args = $"-y -loglevel error -init_hw_device d3d11va -filter_complex \"{filter}\" -fps_mode cfr -r {fr} " +
+                      $"{FfmpegEncoder.CodecArgs(encoder)} {FfmpegEncoder.ColorArgs} {tArg}" +
+                      $"-movflags +frag_keyframe+empty_moov+default_base_moof -f mp4 \"{raw}\"";
+
+        double startQpcMs = QpcClock.NowMs();
+        var startUtc = DateTimeOffset.UtcNow;
+        AudioLoopback? audio = null;
+        string? audioError = null, audioFallback = null;
+        if (opts.Audio)
+        {
+            try { audio = new AudioLoopback(pid, Path.Combine(opts.OutDir, VideoFinalize.AudioFile)); }
+            catch (Exception e)
+            {
+                audioFallback = e.Message;
+                try { audio = new AudioLoopback(Path.Combine(opts.OutDir, VideoFinalize.AudioFile)); }
+                catch (Exception e2) { audioError = $"{e.Message}; playback device: {e2.Message}"; }
+            }
+            audio?.Start();
+            audio?.SetOrigin(startQpcMs);
+        }
+        AudioStatus? AudioNow() => !opts.Audio ? null : audio?.Status(audioFallback) ?? new AudioStatus(AudioStatus.NotRecorded, Error: audioError);
+
+        var ff = Process.Start(new ProcessStartInfo(opts.Ffmpeg, args)
+        {
+            UseShellExecute = false, RedirectStandardInput = true, RedirectStandardError = true,
+        }) ?? throw new InvalidOperationException("cannot start ffmpeg");
+        var errTask = ff.StandardError.ReadToEndAsync();
+        void GracefulStop() { try { ff.StandardInput.Write('q'); ff.StandardInput.Flush(); } catch { /* already exiting */ } }
+        Console.CancelKeyPress += (_, e) => { e.Cancel = true; GracefulStop(); };
+        if (opts.StopEvent is string stopEventName)
+        {
+            var stopEvent = EventWaitHandle.OpenExisting(stopEventName);
+            _ = Task.Run(() => { stopEvent.WaitOne(); GracefulStop(); });
+        }
+        _ = Task.Run(() => { try { proc.WaitForExit(); } catch { /* gone */ } GracefulStop(); });  // the game closed
+
+        if (opts.JsonStatus)
+            Console.WriteLine(new RecorderStatus(RecorderStatus.Started, Fps: opts.Fps, Audio: AudioNow()).ToJson());
+        else
+            Console.WriteLine($"recording the window of {processName} with gfxcapture @ {opts.Fps} fps to {opts.OutDir} (Ctrl+C to stop)");
+
+        ff.WaitForExit();
+        double stopQpcMs = QpcClock.NowMs();
+        audio?.End(stopQpcMs);
+        string ffErr = errTask.GetAwaiter().GetResult().Trim();
+        string? error = ff.ExitCode == 0 ? null : $"ffmpeg exited with {ff.ExitCode}" + (ffErr.Length > 0 ? $": {ffErr}" : "");
+
+        long frames = 0;
+        int width = 0, height = 0;
+        if (File.Exists(raw))
+        {
+            try { var info = Mp4Reader.Read(raw); frames = info.Frames; width = info.Width; height = info.Height; }
+            catch (Exception e) when (e is InvalidDataException or IOException) { error ??= $"video_raw.mp4 unreadable: {e.Message}"; }
+        }
+
+        // Free-running CFR grid: frame k at start + k/fps on this machine's QPC; no duplicates tracked.
+        using (var frameLog = new VideoFrameLogWriter(new StreamWriter(Path.Combine(opts.OutDir, "video_frames.csv"))))
+        {
+            double period = 1000.0 / opts.Fps;
+            for (long k = 0; k < frames; k++)
+            {
+                double t = startQpcMs + k * period;
+                frameLog.Write(new GridTick(k, t, t, false));
+            }
+        }
+
+        audio?.Finish(stopQpcMs);
+        if (audio?.Error is { } audioProblem) Console.Error.WriteLine($"audio: {audioProblem}");
+        var audioStatus = AudioNow();
+        var meta = new Dictionary<string, object?>
+        {
+            ["capture_id"] = Guid.NewGuid().ToString("N"),
+            ["tool_version"] = BuildInfo.Version,
+            ["width"] = width,
+            ["height"] = height,
+            ["screen_width"] = screenWidth,
+            ["screen_height"] = screenHeight,
+            ["fps"] = opts.Fps,
+            ["encoder"] = encoder,
+            ["source"] = source,
+            ["cursor"] = opts.Cursor,
+            ["started_utc"] = startUtc.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+            ["started_qpc_ms"] = startQpcMs,
+            ["stopped_qpc_ms"] = stopQpcMs,
+            ["grid_origin_qpc_ms"] = (double?)null,  // free-running: not round-aligned
+            ["frames"] = frames,
+            ["source_frames"] = frames,
+            ["ffmpeg_exit_code"] = ff.ExitCode,
+            ["error"] = error,
+            ["audio"] = audioStatus is null ? null : new Dictionary<string, object?>
+            {
+                ["sample_rate"] = audio?.Input.SampleRate,
+                ["channels"] = audio?.Input.Channels,
+                ["start_qpc_ms"] = audio?.OriginMs,
+                ["status"] = audioStatus.ToNode(),
+            },
+        };
+        File.WriteAllText(Path.Combine(opts.OutDir, "recording.json"), JsonSerializer.Serialize(meta,
+            new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
+
+        if (opts.JsonStatus)
+            Console.WriteLine(new RecorderStatus(RecorderStatus.Stopped, frames, Width: width, Height: height, Fps: opts.Fps, Error: error, Audio: audioStatus).ToJson());
+        else
+            Console.WriteLine($"stopped: {frames} frames{(error is null ? "" : $"; {error}")}");
+        audio?.Dispose();
+        return error is null ? 0 : 1;
+    }
+
     public const string ObsPasswordVariable = "ODX_OBS_PASSWORD";
 }
 
@@ -816,7 +958,7 @@ internal sealed record Options(string OutDir, string? Window, double Fps, string
             }
         }
         if (outDir is null || encoder is null || ffmpeg is null || (window is null) == !monitor || fps <= 0) return null;
-        if (source is not null && source != "present") return null;   // only "present" (WGC is the default, unnamed) source
+        if (source is not null && source is not ("present" or "gfxcapture")) return null;   // WGC is the default, unnamed source
         return new Options(outDir, window, fps, encoder, ffmpeg, cursor, audio, audioProcess, obs, seconds, stopEvent, jsonStatus, probe, gridOrigin, source);
     }
 }
