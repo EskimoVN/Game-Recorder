@@ -358,6 +358,24 @@ public sealed class CaptureRun : ICaptureRun
         }
         string inputCsv = Path.Combine(SessionDir, "input_events.csv");
         int inputEvents = File.Exists(inputCsv) ? Math.Max(0, File.ReadLines(inputCsv).Count() - 1) : 0;
+        // The longest freeze: the biggest jump between consecutive distinct source-frame times (a run of duplicates holding
+        // the same frame, then a new one). Read before Tidy moves video_frames.csv into raw/.
+        double? maxSourceGapMs = null;
+        string framesCsv = Path.Combine(SessionDir, "video_frames.csv");
+        if (File.Exists(framesCsv))
+        {
+            try
+            {
+                double last = double.NaN, gap = 0;
+                foreach (var tick in VideoFrameLogReader.Read(framesCsv))
+                {
+                    if (!double.IsNaN(last) && tick.TSourceMs > last) gap = Math.Max(gap, tick.TSourceMs - last);
+                    last = tick.TSourceMs;
+                }
+                maxSourceGapMs = gap;
+            }
+            catch (Exception e) when (e is IOException or FormatException or InvalidDataException) { /* no freeze stat */ }
+        }
         if (_reforgerDir is not null &&
             ReforgerCamera.Collect(_reforgerDir, Path.GetFileName(SessionDir), SessionDir, TimeSpan.FromSeconds(3)) is { } warning)
             lock (_stderr) _stderr.Add(warning);
@@ -380,7 +398,7 @@ public sealed class CaptureRun : ICaptureRun
         var report = new CaptureReport(finalize?.Frames ?? status?.Frames ?? 0, roundFrames, _fps, status?.Duplicates ?? 0,
             status?.Starved ?? 0, status?.LeadingBlack ?? 0, File.Exists(Path.Combine(SessionDir, VideoFinalize.Output)),
             status?.Audio?.Source, _gridOrigin, build?.Report?.GridOriginOffsetMs, failure, status?.Audio?.Error,
-            status?.Stop?.Note, Math.Max(0, (status?.Stop?.TailFrames ?? 0) - framesCut), status?.Audio?.SilentRatio);
+            status?.Stop?.Note, Math.Max(0, (status?.Stop?.TailFrames ?? 0) - framesCut), status?.Audio?.SilentRatio, maxSourceGapMs);
         var result = new RunResult(SessionDir, captureOk, status, inputEvents, errors, build, failure, finalize, report);
         SetPhase(CapturePhase.Done, 100);
         return result;

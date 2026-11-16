@@ -96,6 +96,18 @@ public class CaptureReportTests
     }
 
     [Fact]
+    public void A_long_freeze_degrades_or_fails_the_round()
+    {
+        Assert.Equal(CaptureReport.Ok, (Report() with { MaxSourceGapMs = 120 }).Verdict);  // a game under 30 fps: fine
+        var degraded = Report() with { MaxSourceGapMs = 170 };
+        Assert.Equal(CaptureReport.Degraded, degraded.Verdict);
+        Assert.Equal(["frozen 170 ms"], degraded.Problems());
+        var failed = Report() with { MaxSourceGapMs = 229 };  // AM3-023-S01 round 19's 229 ms step, passed as ok before
+        Assert.Equal(CaptureReport.Failed, failed.Verdict);
+        Assert.Equal(["frozen 229 ms (over 200 ms, record the round again)"], failed.Problems());
+    }
+
+    [Fact]
     public void Outside_a_room_nothing_about_the_round_applies()
     {
         var r = Report(round: null, origin: null, offset: null, frames: 100);

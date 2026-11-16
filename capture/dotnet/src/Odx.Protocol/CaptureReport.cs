@@ -26,9 +26,12 @@ namespace Odx.Protocol;
 /// <param name="TailFrames">With <paramref name="StopNote"/>: frames at the end, within the round, that show the frame
 /// before instead; 0 (the given-up frame fell after round_end, where the finalize cuts) is no problem at all.</param>
 /// <param name="AudioSilentRatio">Share of the audio track that is silence; null without audio.</param>
+/// <param name="MaxSourceGapMs">The longest gap between consecutive distinct source-frame times (video_frames.csv): the
+/// longest freeze. Over <see cref="FrozenMs"/> the round is redone; <see cref="FrozenDegradedMs"/>–<see cref="FrozenMs"/>
+/// degrades it. Null when there is no video. A game under the grid rate duplicates frames with small gaps, which is fine.</param>
 public sealed record CaptureReport(long Frames, long? RoundFrames, double Fps, long Duplicates, long Starved, long LeadingBlack,
     bool Video, string? Audio, string? GridOrigin, double? GridOriginOffsetMs, string? Failure, string? AudioError,
-    string? StopNote = null, long TailFrames = 0, double? AudioSilentRatio = null)
+    string? StopNote = null, long TailFrames = 0, double? AudioSilentRatio = null, double? MaxSourceGapMs = null)
 {
     public const string Ok = "ok", Degraded = "degraded", Failed = "failed";
     public const string Aligned = "aligned";
@@ -51,9 +54,14 @@ public sealed record CaptureReport(long Frames, long? RoundFrames, double Fps, l
     public const double MaxSilentRatio = 0.99;
     /// <summary>Silence this long from the start is reported live, so the player can check the game's volume during the round.</summary>
     public const double LiveSilentSeconds = 15;
+    /// <summary>A freeze this long (no new source frame) makes the data unusable: the round is recorded again.</summary>
+    public const double FrozenMs = 200;
+    /// <summary>A freeze this long degrades the round (the frames are there, but motion stutters): kept, flagged.</summary>
+    public const double FrozenDegradedMs = 150;
     [JsonIgnore]
     public string Verdict =>
-        !Video || Failure is not null || TailFrames > MaxTailSeconds * Fps || (RoundFrames is long n && Frames < n) ? Failed
+        !Video || Failure is not null || TailFrames > MaxTailSeconds * Fps || (RoundFrames is long n && Frames < n)
+            || MaxSourceGapMs > FrozenMs ? Failed
             : Problems().Count > 0 ? Degraded : Ok;
 
     /// <summary>One line per problem, the one that decides the verdict first; empty when <see cref="Ok"/>.</summary>
@@ -70,6 +78,8 @@ public sealed record CaptureReport(long Frames, long? RoundFrames, double Fps, l
             problems.Add($"frame 0 off round_start by {off:+0;-0} ms");
         if (AudioError is not null) problems.Add($"audio: {AudioError}");
         if (AudioSilentRatio > MaxSilentRatio) problems.Add(SilentAudio);
+        if (MaxSourceGapMs is double gap && gap > FrozenDegradedMs)
+            problems.Add($"frozen {gap:0} ms" + (gap > FrozenMs ? $" (over {FrozenMs:0} ms, record the round again)" : ""));
         if (StopNote is not null && TailFrames > 0)
             problems.Add($"stop: {StopNote}; the last {TailFrames} frame(s) show the frame before" +
                          (TailFrames > MaxTailSeconds * Fps ? $" (over {MaxTailSeconds} s)" : " (cut from every player at merge)"));
