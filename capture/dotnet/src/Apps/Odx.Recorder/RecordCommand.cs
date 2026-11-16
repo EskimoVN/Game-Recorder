@@ -859,10 +859,15 @@ public static class RecordCommand
 
         long frames = 0;
         int width = 0, height = 0;
-        if (File.Exists(raw))
+        if (File.Exists(raw) && ff.ExitCode == 0)
         {
-            try { var info = Mp4Reader.Read(raw); frames = info.Frames; width = info.Width; height = info.Height; }
-            catch (Exception e) when (e is InvalidDataException or IOException) { error ??= $"video_raw.mp4 unreadable: {e.Message}"; }
+            try
+            {
+                var info = Mp4Reader.Read(raw);          // width/height from the track header (also valid for fragmented mp4)
+                width = info.Width; height = info.Height;
+                frames = VideoTrim.DecodedFrameCount(opts.Ffmpeg, raw);  // Mp4Reader counts the moov, which is empty for this fragmented file
+            }
+            catch (Exception e) when (e is InvalidDataException or IOException or InvalidOperationException) { error ??= $"frame count failed: {e.Message}"; }
         }
 
         // Free-running CFR grid: frame k at start + k/fps on this machine's QPC; no duplicates tracked.
