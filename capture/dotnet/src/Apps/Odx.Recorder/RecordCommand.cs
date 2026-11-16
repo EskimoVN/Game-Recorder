@@ -810,7 +810,10 @@ public static class RecordCommand
         string filter = $"gfxcapture=hwnd={hwnd}:capture_cursor={cursor}:max_framerate={fr}:width=-2:height=-2," +
                         "hwdownload,format=bgra,scale=out_range=tv:out_color_matrix=smpte170m,format=nv12";
         string tArg = opts.Seconds is double secs ? $"-t {secs.ToString(inv)} " : "";
-        string args = $"-y -loglevel error -init_hw_device d3d11va -filter_complex \"{filter}\" -fps_mode cfr -r {fr} " +
+        // -progress on stdout: out_time_us lets us place the first frame on the QPC clock (now - elapsed output time),
+        // which the grid origin aligns against. -stats_period 0.1 gets an early first block.
+        string args = $"-y -loglevel error -progress pipe:1 -stats_period 0.1 -init_hw_device d3d11va " +
+                      $"-filter_complex \"{filter}\" -fps_mode cfr -r {fr} " +
                       $"{FfmpegEncoder.CodecArgs(encoder)} {FfmpegEncoder.ColorArgs} {tArg}" +
                       $"-movflags +frag_keyframe+empty_moov+default_base_moof -f mp4 \"{raw}\"";
 
@@ -834,9 +837,27 @@ public static class RecordCommand
 
         var ff = Process.Start(new ProcessStartInfo(opts.Ffmpeg, args)
         {
-            UseShellExecute = false, RedirectStandardInput = true, RedirectStandardError = true,
+            UseShellExecute = false, RedirectStandardInput = true, RedirectStandardError = true, RedirectStandardOutput = true,
         }) ?? throw new InvalidOperationException("cannot start ffmpeg");
         var errTask = ff.StandardError.ReadToEndAsync();
+        // The QPC of output frame 0: when a -progress block arrives, now - out_time_us is when frame 0 was captured
+        // (corrects for frames already buffered). First reading wins.
+        double firstFrameQpcMs = double.NaN;
+        var progressTask = Task.Run(() =>
+        {
+            string? line;
+            long frame = 0, outUs = -1;
+            while ((line = ff.StandardOutput.ReadLine()) is not null)
+            {
+                int eq = line.IndexOf('=');
+                if (eq <= 0) continue;
+                string key = line[..eq], val = line[(eq + 1)..];
+                if (key == "frame") long.TryParse(val, out frame);
+                else if (key == "out_time_us") { if (!long.TryParse(val, out outUs)) outUs = -1; }
+                else if (key == "progress" && double.IsNaN(firstFrameQpcMs) && frame >= 1 && outUs >= 0)
+                    firstFrameQpcMs = QpcClock.NowMs() - outUs / 1000.0;
+            }
+        });
         void GracefulStop() { try { ff.StandardInput.Write('q'); ff.StandardInput.Flush(); } catch { /* already exiting */ } }
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; GracefulStop(); };
         if (opts.StopEvent is string stopEventName)
@@ -852,6 +873,7 @@ public static class RecordCommand
             Console.WriteLine($"recording the window of {processName} with gfxcapture @ {opts.Fps} fps to {opts.OutDir} (Ctrl+C to stop)");
 
         ff.WaitForExit();
+        try { progressTask.Wait(TimeSpan.FromSeconds(2)); } catch { /* stdout drained on exit */ }
         double stopQpcMs = QpcClock.NowMs();
         audio?.End(stopQpcMs);
         string ffErr = errTask.GetAwaiter().GetResult().Trim();
@@ -870,14 +892,21 @@ public static class RecordCommand
             catch (Exception e) when (e is InvalidDataException or IOException or InvalidOperationException) { error ??= $"frame count failed: {e.Message}"; }
         }
 
-        // Free-running CFR grid: frame k at start + k/fps on this machine's QPC; no duplicates tracked.
+        // Each captured frame k is at t0 + k/fps (CFR, t0 = frame 0's QPC). With --grid-origin-qpc-ms (a round) each frame
+        // is mapped to its nearest grid tick so frame N lines up with the other players; free-running puts the origin at t0.
+        // phaseOffsetMs is how far t0 sits from a grid tick: the residual the ffmpeg-owned loop cannot resample away (the
+        // measurement for whether gfxcapture can sync a round).
+        double period = 1000.0 / opts.Fps;
+        double t0 = double.IsNaN(firstFrameQpcMs) ? startQpcMs : firstFrameQpcMs;
+        double gridOrigin = opts.GridOriginQpcMs ?? t0;
+        double phaseOffsetMs = (t0 - gridOrigin) - Math.Round((t0 - gridOrigin) / period) * period;
         using (var frameLog = new VideoFrameLogWriter(new StreamWriter(Path.Combine(opts.OutDir, "video_frames.csv"))))
         {
-            double period = 1000.0 / opts.Fps;
             for (long k = 0; k < frames; k++)
             {
-                double t = startQpcMs + k * period;
-                frameLog.Write(new GridTick(k, t, t, false));
+                double tsrc = t0 + k * period;
+                long tick = (long)Math.Round((tsrc - gridOrigin) / period);
+                frameLog.Write(new GridTick(k, gridOrigin + tick * period, tsrc, false));
             }
         }
 
@@ -899,7 +928,9 @@ public static class RecordCommand
             ["started_utc"] = startUtc.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
             ["started_qpc_ms"] = startQpcMs,
             ["stopped_qpc_ms"] = stopQpcMs,
-            ["grid_origin_qpc_ms"] = (double?)null,  // free-running: not round-aligned
+            ["grid_origin_qpc_ms"] = opts.GridOriginQpcMs,
+            ["first_frame_qpc_ms"] = double.IsNaN(firstFrameQpcMs) ? (double?)null : firstFrameQpcMs,
+            ["grid_phase_offset_ms"] = Math.Round(phaseOffsetMs, 3),  // residual misalignment of frame 0 vs the grid (sync measurement)
             ["frames"] = frames,
             ["source_frames"] = frames,
             ["ffmpeg_exit_code"] = ff.ExitCode,
