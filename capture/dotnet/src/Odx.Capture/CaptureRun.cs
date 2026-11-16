@@ -198,7 +198,8 @@ public sealed class CaptureRun : ICaptureRun
                         break;
                     default:
                         Volatile.Write(ref _lastStatus, status);
-                        string? problem = CaptureReport.LiveProblem(status.Frames, status.Duplicates, status.Starved, status.LeadingBlack, _fps);
+                        string? problem = CaptureReport.LiveProblem(status.Frames, status.Duplicates, status.Starved, status.LeadingBlack, _fps,
+                            status.Audio?.SilentRatio);
                         if (problem != Volatile.Read(ref _problem))
                         {
                             Volatile.Write(ref _problem, problem);
@@ -377,7 +378,7 @@ public sealed class CaptureRun : ICaptureRun
         var report = new CaptureReport(finalize?.Frames ?? status?.Frames ?? 0, roundFrames, _fps, status?.Duplicates ?? 0,
             status?.Starved ?? 0, status?.LeadingBlack ?? 0, File.Exists(Path.Combine(SessionDir, VideoFinalize.Output)),
             status?.Audio?.Source, _gridOrigin, build?.Report?.GridOriginOffsetMs, failure, status?.Audio?.Error,
-            status?.Stop?.Note, Math.Max(0, (status?.Stop?.TailFrames ?? 0) - framesCut));
+            status?.Stop?.Note, Math.Max(0, (status?.Stop?.TailFrames ?? 0) - framesCut), status?.Audio?.SilentRatio);
         var result = new RunResult(SessionDir, captureOk, status, inputEvents, errors, build, failure, finalize, report);
         SetPhase(CapturePhase.Done, 100);
         return result;

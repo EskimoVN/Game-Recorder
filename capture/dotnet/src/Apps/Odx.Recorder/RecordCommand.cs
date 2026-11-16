@@ -353,8 +353,9 @@ public static class RecordCommand
         using (var progress = opts.JsonStatus ? new Timer(_ =>
                {
                    RecorderStatus s;
+                   var audioNow = AudioNow();
                    lock (gate) s = new(RecorderStatus.Progress, writer?.Written ?? 0, resampler.Duplicates, resampler.DroppedSourceFrames,
-                       Starved: starvedFrames, LeadingBlack: resampler.LeadingBlackFrames);
+                       Starved: starvedFrames, LeadingBlack: resampler.LeadingBlackFrames, Audio: audioNow);
                    Console.WriteLine(s.ToJson());
                }, null, 1000, 1000) : null)
         {
