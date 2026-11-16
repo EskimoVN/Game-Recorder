@@ -47,10 +47,11 @@ if(WIN32)
   target_link_libraries(odx_extractor PRIVATE odx_core minhook d3d11 dxgi psapi)
   target_compile_definitions(odx_extractor PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
 
-  # Arma 3 loads <name>_x64.dll for `"odx_capture" callExtension ...` from the addon's folder.
-  add_library(odx_capture SHARED src/win/arma3_extension.cpp)
+  # Arma 3 loads <name>_x64.dll for `"odx_capture" callExtension ...` from the addon's folder. It also carries the
+  # Present hook (research/arma3-present-capture) that feeds `odx record --source present` over shared memory.
+  add_library(odx_capture SHARED src/win/arma3_extension.cpp src/win/present_capture.cpp)
   set_target_properties(odx_capture PROPERTIES OUTPUT_NAME odx_capture_x64)
-  target_link_libraries(odx_capture PRIVATE odx_core)
+  target_link_libraries(odx_capture PRIVATE odx_core minhook d3d11 dxgi)
   target_compile_definitions(odx_capture PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
 
   add_executable(odx_inject tools/win/inject_main.cpp)

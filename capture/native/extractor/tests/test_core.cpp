@@ -7,6 +7,7 @@
 
 #include "odx/arma3_log.hpp"
 #include "odx/config.hpp"
+#include "odx/present_shm.hpp"
 #include "odx/fake_game.hpp"
 #include "odx/memory.hpp"
 #include "odx/profile.hpp"
@@ -139,6 +140,20 @@ TEST_CASE("Arma 3 frame payloads need 15 fields on one line") {
     CHECK_FALSE(arma3_frame_ok("INTERNAL,1,2,3"));
     CHECK_FALSE(arma3_frame_ok("INTERNAL,1,2,3,1,0,0,0,0,1,0,1,0,0.75,0.75,1"));
     CHECK_FALSE(arma3_frame_ok("INTERNAL,1,2,3,1,0,0,0,0,1,0,1,0,0.75,0.75\nx"));
+}
+
+TEST_CASE("Present shared-memory layout matches the dotnet PresentMapping contract") {
+    using namespace odx::present;
+    CHECK(sizeof(Header) == 40);
+    CHECK(offsetof(Header, capture) == 4);
+    CHECK(offsetof(Header, fps) == 8);
+    CHECK(offsetof(Header, origin_qpc_ms) == 16);
+    CHECK(offsetof(Header, write_seq) == 32);
+    CHECK(sizeof(SlotHeader) == 16);
+    CHECK(kSlotCount == 4);
+    CHECK(kMaxNv12Bytes == 12441600);
+    CHECK(kSlotStride == 16 + 12441600);
+    CHECK(kMappingSize == 40 + 4 * (16 + 12441600));
 }
 
 TEST_CASE("format_double keeps full precision and a decimal point") {

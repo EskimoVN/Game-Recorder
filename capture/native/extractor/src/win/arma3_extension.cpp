@@ -13,6 +13,7 @@
 
 #include "common.hpp"
 #include "odx/arma3_log.hpp"
+#include "present_capture.hpp"
 
 namespace {
 
@@ -56,7 +57,16 @@ __declspec(dllexport) void __stdcall RVExtensionVersion(char* output, unsigned i
 
 __declspec(dllexport) void __stdcall RVExtension(char* output, unsigned int outputSize, const char* function) {
     double t = odx::win::qpc_ms();
-    std::call_once(started, [] { std::thread(worker).detach(); });
+    std::call_once(started, [] {
+        std::thread(worker).detach();
+        // Install the Present hook off the call thread (it creates a throwaway D3D device): video capture arms itself
+        // once odx record's shared mapping appears. The camera log (above) is independent and works without it.
+        std::thread([] {
+            std::string error;
+            if (!odx::win::install_present_capture(error) && !error.empty())
+                OutputDebugStringA(("odx_capture present hook: " + error + "\n").c_str());
+        }).detach();
+    });
     reply(output, outputSize, "");
     if (!recording) return;
     if (!odx::arma3_frame_ok(function)) {

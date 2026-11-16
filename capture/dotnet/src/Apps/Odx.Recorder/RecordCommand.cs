@@ -62,10 +62,18 @@ public static class RecordCommand
         if (opts is null)
         {
             Console.Error.WriteLine("usage: odx record --out <dir> (--window <process name> | --monitor) [--fps 60] " +
-                                    "[--encoder auto|x264|nvenc|mf] [--ffmpeg <path>] [--cursor] [--audio [--audio-process <process name>]] [--obs <host:port>] [--seconds N] [--stop-event <name>] [--grid-origin-qpc-ms <ms>] [--json-status] [--probe]");
+                                    "[--encoder auto|x264|nvenc|mf] [--ffmpeg <path>] [--cursor] [--audio [--audio-process <process name>]] [--obs <host:port>] [--source present] [--seconds N] [--stop-event <name>] [--grid-origin-qpc-ms <ms>] [--json-status] [--probe]");
             return 2;
         }
         if (opts.Obs is string obs) return RunObs(opts, obs);
+        string? presentFallback = null;
+        if (opts.Source == "present")
+        {
+            var (code, fallback) = RunPresent(opts);
+            if (code is int c) return c;
+            presentFallback = fallback;  // the DLL produced no frame: Windows.Graphics.Capture records this round instead
+            Console.Error.WriteLine($"present source unavailable, using Windows.Graphics.Capture: {fallback}");
+        }
         if (!GraphicsCaptureSession.IsSupported())
         {
             Console.Error.WriteLine("Windows.Graphics.Capture is not supported on this system");
@@ -386,6 +394,7 @@ public static class RecordCommand
             ["fps"] = opts.Fps,
             ["encoder"] = encoderName.Result,
             ["source"] = source,
+            ["present_fallback"] = presentFallback,
             ["cursor"] = opts.Cursor,
             ["started_utc"] = startUtc.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
             ["started_qpc_ms"] = startQpcMs,
@@ -580,17 +589,204 @@ public static class RecordCommand
         return error is null ? 0 : 1;
     }
 
+    // --source present: NV12 frames straight from the game's own Present (odx_capture_x64's hook), paced to the capture
+    // grid, so each video frame is a fresh game frame (research/arma3-present-capture §4). Needs --window (the game whose
+    // Present is hooked). Returns the exit code, or (null, reason) to fall back to WGC when the DLL wrote no frame in 2 s.
+    private static (int? Code, string? Fallback) RunPresent(Options opts)
+    {
+        if (opts.Window is not string processName)
+        {
+            Console.Error.WriteLine("--source present needs --window <game process>");
+            return (2, null);
+        }
+        var proc = Process.GetProcessesByName(Path.GetFileNameWithoutExtension(processName))
+            .FirstOrDefault(p => p.MainWindowHandle != IntPtr.Zero);
+        if (proc is null)
+        {
+            Console.Error.WriteLine($"no window found for process '{processName}'");
+            return (1, null);
+        }
+        int pid = proc.Id;
+        var (screenWidth, screenHeight) = CaptureInterop.MonitorSize(CaptureInterop.MonitorOf(proc.MainWindowHandle));
+        Directory.CreateDirectory(opts.OutDir);
+
+        // The limiter in the DLL and this resampler share the grid origin; QPC is the same clock in both processes.
+        double originMs = opts.GridOriginQpcMs ?? QpcClock.NowMs();
+        using var mapping = PresentMapping.Create(pid, (int)opts.Fps, originMs);
+        using var frameEvent = new EventWaitHandle(false, EventResetMode.AutoReset, PresentMapping.EventName(pid));
+        mapping.Capture = 1;
+
+        var stop = new ManualResetEventSlim();
+        Console.CancelKeyPress += (_, e) => { e.Cancel = true; stop.Set(); };
+        if (opts.StopEvent is string stopEventName)
+        {
+            var stopEvent = EventWaitHandle.OpenExisting(stopEventName);
+            _ = Task.Run(() => { stopEvent.WaitOne(); stop.Set(); });
+        }
+        if (opts.Seconds is double seconds)
+            _ = Task.Run(() => { Thread.Sleep(TimeSpan.FromSeconds(seconds)); stop.Set(); });
+        _ = Task.Run(() => { try { proc.WaitForExit(); } catch { /* already gone */ } stop.Set(); });
+
+        // The DLL installs its hook on the first callExtension and only captures while it sees the mapping: give it 2 s.
+        var wait = Stopwatch.StartNew();
+        while (mapping.Width == 0)
+        {
+            if (stop.IsSet) { mapping.Capture = 0; return (0, null); }
+            if (wait.Elapsed > TimeSpan.FromSeconds(2))
+            {
+                mapping.Capture = 0;
+                return (null, $"odx_capture wrote no frame within 2 s (pid {pid})");
+            }
+            frameEvent.WaitOne(100);
+        }
+
+        int width = mapping.Width, height = mapping.Height;
+        if (width > PresentMapping.MaxWidth || height > PresentMapping.MaxHeight)
+        {
+            mapping.Capture = 0;
+            return (null, $"backbuffer {width}x{height} is larger than the present contract's {PresentMapping.MaxWidth}x{PresentMapping.MaxHeight}");
+        }
+        int frameBytes = width * height * 3 / 2;
+        string encoder = EncoderChoice.Resolve(opts.Ffmpeg, opts.Encoder);
+        string source = $"present:{Path.GetFileNameWithoutExtension(processName)}";
+
+        using var frameLog = new VideoFrameLogWriter(new StreamWriter(Path.Combine(opts.OutDir, "video_frames.csv")) { AutoFlush = true });
+        var resampler = new GridResampler(opts.Fps, originMs);
+        var encoderProc = new FfmpegEncoder(opts.Ffmpeg, Path.Combine(opts.OutDir, VideoFinalize.RawVideo), width, height, opts.Fps, encoder);
+        var writer = new FrameWriter(encoderProc, frameLog, frameBytes);
+
+        double startQpcMs = QpcClock.NowMs();
+        var startUtc = DateTimeOffset.UtcNow;
+
+        AudioLoopback? audio = null;
+        string? audioError = null, audioFallback = null;
+        if (opts.Audio)
+        {
+            try { audio = new AudioLoopback(pid, Path.Combine(opts.OutDir, VideoFinalize.AudioFile)); }
+            catch (Exception e)
+            {
+                audioFallback = e.Message;
+                try { audio = new AudioLoopback(Path.Combine(opts.OutDir, VideoFinalize.AudioFile)); }
+                catch (Exception e2) { audioError = $"{e.Message}; playback device: {e2.Message}"; }
+            }
+            audio?.Start();
+        }
+        AudioStatus? AudioNow() => !opts.Audio ? null : audio?.Status(audioFallback) ?? new AudioStatus(AudioStatus.NotRecorded, Error: audioError);
+
+        long sourceFrames = 0, starvedFrames = 0;
+        double lastPresentMs = double.NegativeInfinity;
+        byte[]? shown = null;   // the frame GridResampler currently shows; the next frame's Advance emits it
+        bool originSet = false;
+
+        // The ticks show the frame on screen (shown) up to now; next takes its place. Black ticks before the first frame
+        // submit a null frame (FrameWriter writes NV12 black).
+        void Emit(IReadOnlyList<GridTick> ticks, byte[]? next)
+        {
+            if (!originSet && ticks is [{ Index: 0 } first, ..]) { audio?.SetOrigin(first.TGridMs); originSet = true; }
+            writer.Submit(shown, ticks);
+            shown = next;
+        }
+
+        if (opts.JsonStatus)
+            Console.WriteLine(new RecorderStatus(RecorderStatus.Started, Width: width, Height: height, Fps: opts.Fps, Audio: AudioNow()).ToJson());
+        else
+            Console.WriteLine($"recording {width}x{height} @ {opts.Fps} fps from the game's Present to {opts.OutDir} (Ctrl+C to stop)");
+
+        using (var progress = opts.JsonStatus ? new Timer(_ =>
+               Console.WriteLine(new RecorderStatus(RecorderStatus.Progress, writer.Written, resampler.Duplicates,
+                   resampler.DroppedSourceFrames, Starved: starvedFrames, LeadingBlack: resampler.LeadingBlackFrames,
+                   Audio: AudioNow()).ToJson()), null, 1000, 1000) : null)
+        {
+            while (!stop.IsSet)
+            {
+                frameEvent.WaitOne(200);
+                if (writer.Error is not null) break;
+                if (!writer.TryRent(RentWait, out var incoming)) { starvedFrames++; continue; }
+                if (mapping.TryReadNewest(incoming, out double presentMs) && presentMs > lastPresentMs)
+                {
+                    lastPresentMs = presentMs;
+                    sourceFrames++;
+                    Emit(resampler.Advance(presentMs), incoming);
+                }
+                else writer.Submit(incoming, []);  // no new frame since the last read (or a torn read): buffer back to the pool
+            }
+        }
+
+        double stopQpcMs = QpcClock.NowMs();
+        mapping.Capture = 0;
+        audio?.End(stopQpcMs);
+        Emit(resampler.Finish(stopQpcMs), null);
+        bool drained = writer.Complete(DrainTimeout);
+        string? error = writer.Error;
+        long framesWritten = writer.Written;
+        frameLog.Flush();
+        encoderProc.EndVideo();
+        audio?.Finish(stopQpcMs);
+        if (audio?.Error is { } audioProblem) Console.Error.WriteLine($"audio: {audioProblem}");
+        var audioStatus = AudioNow();
+        int ffmpegExit = encoderProc.Finish(FfmpegExitTimeout);
+        if (!drained) error ??= "ffmpeg stopped reading video";
+        if (error is null && ffmpegExit != 0) error = $"ffmpeg exited with code {ffmpegExit}";
+
+        var meta = new Dictionary<string, object?>
+        {
+            ["capture_id"] = Guid.NewGuid().ToString("N"),
+            ["tool_version"] = BuildInfo.Version,
+            ["width"] = width,
+            ["height"] = height,
+            ["screen_width"] = screenWidth,
+            ["screen_height"] = screenHeight,
+            ["fps"] = opts.Fps,
+            ["encoder"] = encoder,
+            ["source"] = source,
+            ["cursor"] = opts.Cursor,
+            ["started_utc"] = startUtc.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+            ["started_qpc_ms"] = startQpcMs,
+            ["stopped_qpc_ms"] = stopQpcMs,
+            ["grid_origin_qpc_ms"] = opts.GridOriginQpcMs,
+            ["frames"] = framesWritten,
+            ["duplicate_frames"] = resampler.Duplicates,
+            ["dropped_source_frames"] = resampler.DroppedSourceFrames,
+            ["leading_black_frames"] = resampler.LeadingBlackFrames,
+            ["source_frames"] = sourceFrames,
+            ["starved_frames"] = starvedFrames,
+            ["encode_write_ms"] = writer.WriteMs,
+            ["encode_write_max_ms"] = writer.WriteMaxMs,
+            ["ffmpeg_exit_code"] = ffmpegExit,
+            ["error"] = error,
+            ["audio"] = audioStatus is null ? null : new Dictionary<string, object?>
+            {
+                ["sample_rate"] = audio?.Input.SampleRate,
+                ["channels"] = audio?.Input.Channels,
+                ["start_qpc_ms"] = audio?.OriginMs,
+                ["status"] = audioStatus.ToNode(),
+            },
+        };
+        File.WriteAllText(Path.Combine(opts.OutDir, "recording.json"), JsonSerializer.Serialize(meta,
+            new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
+
+        if (opts.JsonStatus)
+            Console.WriteLine(new RecorderStatus(RecorderStatus.Stopped, framesWritten, resampler.Duplicates,
+                resampler.DroppedSourceFrames, width, height, opts.Fps, error, audioStatus, Starved: starvedFrames,
+                LeadingBlack: resampler.LeadingBlackFrames).ToJson());
+        else
+            Console.WriteLine($"stopped: {framesWritten} frames, {resampler.Duplicates} duplicated, {resampler.DroppedSourceFrames} dropped, ffmpeg exit {ffmpegExit}");
+        encoderProc.Dispose();
+        audio?.Dispose();
+        return (error is null && ffmpegExit == 0 ? 0 : 1, null);
+    }
+
     public const string ObsPasswordVariable = "ODX_OBS_PASSWORD";
 }
 
 /// <param name="GridOriginQpcMs">The grid's tick 0 on the QPC clock; null puts it at the first captured frame.</param>
 internal sealed record Options(string OutDir, string? Window, double Fps, string Encoder, string Ffmpeg, bool Cursor,
     bool Audio, string? AudioProcess, string? Obs, double? Seconds, string? StopEvent, bool JsonStatus, bool Probe,
-    double? GridOriginQpcMs = null)
+    double? GridOriginQpcMs = null, string? Source = null)
 {
     public static Options? Parse(string[] args)
     {
-        string? outDir = null, window = null, encoder = "auto", ffmpeg = ExternalTools.Ffmpeg(), stopEvent = null, audioProcess = null, obs = null;
+        string? outDir = null, window = null, encoder = "auto", ffmpeg = ExternalTools.Ffmpeg(), stopEvent = null, audioProcess = null, obs = null, source = null;
         bool monitor = false, cursor = false, audio = false, jsonStatus = false, probe = false;
         double fps = 60;
         double? seconds = null, gridOrigin = null;
@@ -615,10 +811,12 @@ internal sealed record Options(string OutDir, string? Window, double Fps, string
                 case "--grid-origin-qpc-ms" when double.TryParse(Next(), System.Globalization.NumberStyles.Float, inv, out var g): gridOrigin = g; break;
                 case "--json-status": jsonStatus = true; break;
                 case "--probe": probe = true; break;
+                case "--source": source = Next(); break;
                 default: return null;
             }
         }
         if (outDir is null || encoder is null || ffmpeg is null || (window is null) == !monitor || fps <= 0) return null;
-        return new Options(outDir, window, fps, encoder, ffmpeg, cursor, audio, audioProcess, obs, seconds, stopEvent, jsonStatus, probe, gridOrigin);
+        if (source is not null && source != "present") return null;   // only "present" (WGC is the default, unnamed) source
+        return new Options(outDir, window, fps, encoder, ffmpeg, cursor, audio, audioProcess, obs, seconds, stopEvent, jsonStatus, probe, gridOrigin, source);
     }
 }

@@ -12,6 +12,8 @@ namespace Odx.Capture;
 /// <param name="Network">The game's network traffic to record in multiplayer (spec v3 §2.3); null records none.</param>
 /// <param name="CameraSource">Where the camera comes from when no extractor DLL writes camera_samples.csv:
 /// "reforger-mod" (<see cref="ReforgerCamera"/>) or "arma3-mod" (<see cref="Arma3Camera"/>); null for none.</param>
+/// <param name="VideoSource">"present" records the game's own Present through odx_capture_x64 (odx record --source present,
+/// research/arma3-present-capture); null records with Windows.Graphics.Capture.</param>
 public sealed record GameProfile(
     string GameTitle,
     string Platform,
@@ -20,7 +22,8 @@ public sealed record GameProfile(
     IReadOnlyDictionary<string, string> Bindings,
     string? WindowProcess = null,
     PacketCaptureSpec? Network = null,
-    string? CameraSource = null)
+    string? CameraSource = null,
+    string? VideoSource = null)
 {
     /// <summary>The profile file as read, written out as key_bindings.json.</summary>
     public JsonObject Json { get; init; } = [];
@@ -42,6 +45,9 @@ public sealed record GameProfile(
             json["network"] is JsonObject network ? PacketCaptureSpec.Parse(network, source) : null,
             json["camera_source"]?.GetValue<string>() is { } camera
                 ? camera is ReforgerCamera.Source or Arma3Camera.Source ? camera : throw new FormatException($"{source}: unknown camera_source \"{camera}\"")
+                : null,
+            json["video_source"]?.GetValue<string>() is { } video
+                ? video is "present" ? video : throw new FormatException($"{source}: unknown video_source \"{video}\"")
                 : null) { Json = (JsonObject)json.DeepClone() };
     }
 }

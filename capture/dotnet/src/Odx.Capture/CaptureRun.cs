@@ -172,6 +172,8 @@ public sealed class CaptureRun : ICaptureRun
         var recordArgs = new List<string> { "--out", SessionDir, "--fps", options.Fps.ToString(CultureInfo.InvariantCulture),
             "--stop-event", stopName, "--json-status" };
         recordArgs.AddRange(options.WindowProcess is string p ? ["--window", p] : ["--monitor"]);
+        // The game's own Present (odx_capture_x64), when the profile asks and a window is recorded; falls back to WGC.
+        if (profile?.VideoSource == "present" && options.WindowProcess is not null) recordArgs.AddRange(["--source", "present"]);
         if (options.Audio) recordArgs.Add("--audio");
         // Recording the monitor: the profile still names the game, so only its sound is recorded.
         if (options.Audio && options.WindowProcess is null && profile?.WindowProcess is string game)

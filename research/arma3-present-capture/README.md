@@ -59,3 +59,30 @@ Allowed by the ground rules (`document/games/README.md`): a private server with 
 - The limiter caps the player's fps for the whole round; 30 fps play may be rejected by players.
 - Readback on the render thread costs frame time; must stay under ~1 ms p99.
 - Reforger has no `callExtension` and may run DX12: not covered here.
+
+## Status (2026-11-16)
+
+Steps 1-5 implemented and building on both toolchains (native + dotnet); not yet run against a live Arma 3 round.
+
+- **1 (contract):** `capture/native/extractor/include/odx/present_shm.hpp` + a layout test in `tests/test_core.cpp`;
+  `capture/dotnet/src/Apps/Odx.Recorder/PresentShm.cs` (`PresentMapping`). odx record creates `Local\OdxCapture_<pid>`
+  (sized for 4K), the DLL opens it; the C# round-trip test is deferred (Odx.Tests is net10.0 and cannot reference the
+  Windows-only Odx.Recorder — the C++ test and the shared constants pin the layout).
+- **2-3 (in-game capture + limiter):** `capture/native/extractor/src/win/present_capture.cpp` (BGRA→NV12 via
+  `ID3D11VideoProcessor`, a 3-staging ring mapped `DO_NOT_WAIT`, publishes the oldest ready frame; limiter on a
+  high-resolution waitable timer, `SyncInterval` forced to 0 while capturing). Hooks Present (vtable 8) and ResizeBuffers
+  (13) with MinHook, installed off the first `callExtension` (`arma3_extension.cpp`). NOT hooked: Present1 (22) — Real
+  Virtuality presents through Present. Built into `odx_capture_x64.dll`, which OdxArma3.exe embeds.
+- **4 (odx record --source present):** `RunPresent` in `RecordCommand.cs` — opens the mapping, feeds the slots into the
+  existing GridResampler + FrameWriter (no WGC, no Nv12Converter), `recording.json` source `present:arma3_x64`; no frame
+  in 2 s → falls back to WGC with the reason in `present_fallback`. `video_frames.csv` format unchanged.
+- **5 (profile switch):** `GameProfile.VideoSource` + `odx record --source present` wiring in `CaptureRun`. **Left OFF:**
+  `capture/profiles/arma3.json` does NOT set `"video_source": "present"` yet — see the gates below.
+
+### Before enabling (gates, on the machine that has `document/`)
+
+- Update `document/games/arma3.md §3` ("no hooks") to allow the Present hook, and confirm the Q13 licence question is
+  unaffected (Compliance, above). Only then add `"video_source": "present"` to `capture/profiles/arma3.json`.
+- Run step 0 first (`cadence.py` on real rounds; try a 60 fps cap): if even steps ≥ 99 % everywhere, the hook is not needed.
+- Live checks (Verify, above): colour (the VideoProcessor range/matrix in `present_capture.cpp` is a first guess, matched
+  to `Nv12Converter`), limiter feel, overlays, alt-tab, resize, respawn, MSAA/HDR backbuffers.
