@@ -28,8 +28,12 @@ internal sealed class FfmpegEncoder : IDisposable
             _ => throw new ArgumentException($"unknown encoder '{encoder}' (nvenc|mf|x264)"),
         };
         var fr = fps.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        // The frames are BT.601 limited-range NV12 (Nv12Converter, and the present VideoProcessor): tag the H.264 stream so
+        // players and browsers do not read it as BT.709 and shift the colours (green/red). VideoFinalize copies the stream
+        // (-c:v copy), so these VUI tags carry into video.mp4.
+        const string color = "-colorspace smpte170m -color_primaries smpte170m -color_trc smpte170m -color_range tv";
         var args = $"-y -loglevel error -nostdin -f rawvideo -pix_fmt nv12 -s {width}x{height} -framerate {fr} -i - " +
-                   $"{codec} -r {fr} -movflags +frag_keyframe+empty_moov+default_base_moof -f mp4 \"{output}\"";
+                   $"{codec} {color} -r {fr} -movflags +frag_keyframe+empty_moov+default_base_moof -f mp4 \"{output}\"";
         _proc = Process.Start(new ProcessStartInfo(ffmpeg, args)
         {
             RedirectStandardInput = true,
