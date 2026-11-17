@@ -16,20 +16,28 @@ internal sealed class FfmpegEncoder : IDisposable
     /// <summary>nvenc, mf or x264.</summary>
     public string Encoder { get; }
 
+    // -maxrate/-bufsize cap the file at ~8 Mbps (VBV): a round's video stays small without touching the preset, so the
+    // GPU/CPU cost is unchanged (a game that saturates the GPU still encodes). Quality-mode mf keeps its own target.
+    public static string CodecArgs(string encoder) => encoder switch
+    {
+        "nvenc" => "-c:v h264_nvenc -preset p1 -rc vbr -cq 23 -maxrate 8M -bufsize 16M -bf 0 -g 120",  // p1: the fastest; a GPU the game saturates encodes slowly (Bảo, 2026-11-07)
+        "x264" => "-c:v libx264 -preset veryfast -crf 20 -maxrate 8M -bufsize 16M -bf 0 -g 120",
+        // Media Foundation's hardware H.264 encoder: Intel Quick Sync, AMD or NVIDIA, whichever GPU has one.
+        "mf" => "-c:v h264_mf -hw_encoding 1 -rate_control quality -quality 70 -bf 0 -g 120",
+        _ => throw new ArgumentException($"unknown encoder '{encoder}' (nvenc|mf|x264)"),
+    };
+
+    // The frames are BT.601 limited-range NV12 (Nv12Converter, the present VideoProcessor, the gfxcapture scale): tag the
+    // H.264 stream so players and browsers do not read it as BT.709 and shift the colours (green/red). VideoFinalize copies
+    // the stream (-c:v copy), so these VUI tags carry into video.mp4.
+    public const string ColorArgs = "-colorspace smpte170m -color_primaries smpte170m -color_trc smpte170m -color_range tv";
+
     public FfmpegEncoder(string ffmpeg, string output, int width, int height, double fps, string encoder)
     {
         Encoder = encoder;
-        string codec = encoder switch
-        {
-            "nvenc" => "-c:v h264_nvenc -preset p1 -rc vbr -cq 23 -bf 0 -g 120",  // p1: the fastest; a GPU the game saturates encodes slowly (Bảo, 2026-11-07)
-            "x264" => "-c:v libx264 -preset veryfast -crf 20 -bf 0 -g 120",
-            // Media Foundation's hardware H.264 encoder: Intel Quick Sync, AMD or NVIDIA, whichever GPU has one.
-            "mf" => "-c:v h264_mf -hw_encoding 1 -rate_control quality -quality 70 -bf 0 -g 120",
-            _ => throw new ArgumentException($"unknown encoder '{encoder}' (nvenc|mf|x264)"),
-        };
         var fr = fps.ToString(System.Globalization.CultureInfo.InvariantCulture);
         var args = $"-y -loglevel error -nostdin -f rawvideo -pix_fmt nv12 -s {width}x{height} -framerate {fr} -i - " +
-                   $"{codec} -r {fr} -movflags +frag_keyframe+empty_moov+default_base_moof -f mp4 \"{output}\"";
+                   $"{CodecArgs(encoder)} {ColorArgs} -r {fr} -movflags +frag_keyframe+empty_moov+default_base_moof -f mp4 \"{output}\"";
         _proc = Process.Start(new ProcessStartInfo(ffmpeg, args)
         {
             RedirectStandardInput = true,

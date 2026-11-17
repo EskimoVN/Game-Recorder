@@ -109,6 +109,7 @@ research/
   analyze-pose/                   # Standalone Python pose audit (numpy), not part of the product
   reforger-camera-spike/          # Arma Reforger camera spike: Enforce Script logger mod + analyze.py (layout, FOV, clock)
   arma3-camera-spike/             # Arma 3: launcher/OdxArma3 (net48 exe that packs the addon into @OdxCapture and starts the game)
+  arma3-present-capture/          # Plan: Arma 3 video from the game's Present (hook + limiter) + cadence.py (frame step check)
   reforger-spawn-survey/          # Everon terrain survey mod + picker behind capture/deploy/aws/reforger/spawn_points.txt,
                                   #   launcher/OdxReforger: net48 exe that installs the mod and starts the game
 ```

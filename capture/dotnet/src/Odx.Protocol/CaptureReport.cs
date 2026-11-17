@@ -25,9 +25,13 @@ namespace Odx.Protocol;
 /// captured (decided 2026-11-09); over <see cref="MaxTailSeconds"/> of stand-in frames it is a failure.</param>
 /// <param name="TailFrames">With <paramref name="StopNote"/>: frames at the end, within the round, that show the frame
 /// before instead; 0 (the given-up frame fell after round_end, where the finalize cuts) is no problem at all.</param>
+/// <param name="AudioSilentRatio">Share of the audio track that is silence; null without audio.</param>
+/// <param name="MaxSourceGapMs">The longest gap between consecutive distinct source-frame times (video_frames.csv): the
+/// longest freeze. Over <see cref="FrozenMs"/> the round is redone; <see cref="FrozenDegradedMs"/>–<see cref="FrozenMs"/>
+/// degrades it. Null when there is no video. A game under the grid rate duplicates frames with small gaps, which is fine.</param>
 public sealed record CaptureReport(long Frames, long? RoundFrames, double Fps, long Duplicates, long Starved, long LeadingBlack,
     bool Video, string? Audio, string? GridOrigin, double? GridOriginOffsetMs, string? Failure, string? AudioError,
-    string? StopNote = null, long TailFrames = 0)
+    string? StopNote = null, long TailFrames = 0, double? AudioSilentRatio = null, double? MaxSourceGapMs = null)
 {
     public const string Ok = "ok", Degraded = "degraded", Failed = "failed";
     public const string Aligned = "aligned";
@@ -43,9 +47,21 @@ public sealed record CaptureReport(long Frames, long? RoundFrames, double Fps, l
     public const double SettleSeconds = 10;
     /// <summary>Stand-in frames at the end the merge may cut from every player: the client allows a round to end a few seconds before the game's.</summary>
     public const double MaxTailSeconds = 3;
+    /// <summary>
+    /// A track this silent is a game that played nothing (muted, or its audio device lost: AM3-023-S01 round 19 on
+    /// 2026-11-13, other rounds of the same player fine); a real round always has some sound.
+    /// </summary>
+    public const double MaxSilentRatio = 0.99;
+    /// <summary>Silence this long from the start is reported live, so the player can check the game's volume during the round.</summary>
+    public const double LiveSilentSeconds = 15;
+    /// <summary>A freeze this long (no new source frame) makes the data unusable: the round is recorded again.</summary>
+    public const double FrozenMs = 200;
+    /// <summary>A freeze this long degrades the round (the frames are there, but motion stutters): kept, flagged.</summary>
+    public const double FrozenDegradedMs = 150;
     [JsonIgnore]
     public string Verdict =>
-        !Video || Failure is not null || TailFrames > MaxTailSeconds * Fps || (RoundFrames is long n && Frames < n) ? Failed
+        !Video || Failure is not null || TailFrames > MaxTailSeconds * Fps || (RoundFrames is long n && Frames < n)
+            || MaxSourceGapMs > FrozenMs ? Failed
             : Problems().Count > 0 ? Degraded : Ok;
 
     /// <summary>One line per problem, the one that decides the verdict first; empty when <see cref="Ok"/>.</summary>
@@ -61,15 +77,21 @@ public sealed record CaptureReport(long Frames, long? RoundFrames, double Fps, l
         else if (GridOriginOffsetMs is double off && Math.Abs(off) > MaxGridOriginOffsetMs)
             problems.Add($"frame 0 off round_start by {off:+0;-0} ms");
         if (AudioError is not null) problems.Add($"audio: {AudioError}");
+        if (AudioSilentRatio > MaxSilentRatio) problems.Add(SilentAudio);
+        if (MaxSourceGapMs is double gap && gap > FrozenDegradedMs)
+            problems.Add($"frozen {gap:0} ms" + (gap > FrozenMs ? $" (over {FrozenMs:0} ms, record the round again)" : ""));
         if (StopNote is not null && TailFrames > 0)
             problems.Add($"stop: {StopNote}; the last {TailFrames} frame(s) show the frame before" +
                          (TailFrames > MaxTailSeconds * Fps ? $" (over {MaxTailSeconds} s)" : " (cut from every player at merge)"));
         return problems;
     }
 
-    /// <summary>The recorder's live counters say the encoder is behind or the start was late; null while all is well (or too early to tell).</summary>
-    public static string? LiveProblem(long frames, long duplicates, long starved, long leadingBlack, double fps) =>
-        EncoderBehind(frames, duplicates, starved, fps) ?? LateStart(leadingBlack, fps);
+    private const string SilentAudio = "audio: silent (is the game muted or its sound device lost?)";
+
+    /// <summary>The recorder's live counters say the encoder is behind, the start was late or the game plays no sound; null while all is well (or too early to tell).</summary>
+    public static string? LiveProblem(long frames, long duplicates, long starved, long leadingBlack, double fps, double? audioSilentRatio = null) =>
+        EncoderBehind(frames, duplicates, starved, fps) ?? LateStart(leadingBlack, fps) ??
+        (frames >= LiveSilentSeconds * fps && audioSilentRatio > MaxSilentRatio ? SilentAudio : null);
 
     private static string? EncoderBehind(long frames, long duplicates, long starved, double fps)
     {

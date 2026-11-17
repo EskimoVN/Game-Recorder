@@ -82,6 +82,32 @@ public class CaptureReportTests
     }
 
     [Fact]
+    public void A_silent_track_degrades_the_round_and_is_reported_live_after_15_s()
+    {
+        const string silent = "audio: silent (is the game muted or its sound device lost?)";
+        var r = new CaptureReport(7244, 7244, 30, 7, 10, 0, true, "process", CaptureReport.Aligned, -0.3, null, null,
+            AudioSilentRatio: 1);  // AM3-023-S01 round 19
+        Assert.Equal(CaptureReport.Degraded, r.Verdict);
+        Assert.Equal([silent], r.Problems());
+        Assert.Equal(CaptureReport.Ok, (r with { AudioSilentRatio = 0.6 }).Verdict);
+        Assert.Null(CaptureReport.LiveProblem(300, 0, 0, 0, 30, audioSilentRatio: 1));
+        Assert.Equal(silent, CaptureReport.LiveProblem(450, 0, 0, 0, 30, audioSilentRatio: 1));
+        Assert.Null(CaptureReport.LiveProblem(450, 0, 0, 0, 30, audioSilentRatio: 0.9));
+    }
+
+    [Fact]
+    public void A_long_freeze_degrades_or_fails_the_round()
+    {
+        Assert.Equal(CaptureReport.Ok, (Report() with { MaxSourceGapMs = 120 }).Verdict);  // a game under 30 fps: fine
+        var degraded = Report() with { MaxSourceGapMs = 170 };
+        Assert.Equal(CaptureReport.Degraded, degraded.Verdict);
+        Assert.Equal(["frozen 170 ms"], degraded.Problems());
+        var failed = Report() with { MaxSourceGapMs = 229 };  // AM3-023-S01 round 19's 229 ms step, passed as ok before
+        Assert.Equal(CaptureReport.Failed, failed.Verdict);
+        Assert.Equal(["frozen 229 ms (over 200 ms, record the round again)"], failed.Problems());
+    }
+
+    [Fact]
     public void Outside_a_room_nothing_about_the_round_applies()
     {
         var r = Report(round: null, origin: null, offset: null, frames: 100);

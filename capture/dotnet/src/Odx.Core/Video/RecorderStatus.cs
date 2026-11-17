@@ -12,7 +12,7 @@ namespace Odx.Core;
 /// <param name="Starved">Captured frames dropped because the encoder had not returned a buffer: the encoder is behind.</param>
 /// <param name="LeadingBlack">Black frames before the first captured one (the recorder started after the grid's origin).</param>
 /// <param name="Audio">The audio track's state when --audio was asked: on <c>started</c> where the sound comes from, on
-/// <c>stopped</c> its counters too. Null without --audio.</param>
+/// <c>progress</c> and <c>stopped</c> its counters too. Null without --audio.</param>
 /// <param name="Stop">On <c>stopped</c>: how long each phase of stopping took.</param>
 public sealed record RecorderStatus(string Event, long Frames = 0, long Duplicates = 0, long Dropped = 0, int Width = 0,
     int Height = 0, double Fps = 0, string? Error = null, AudioStatus? Audio = null, StopTiming? Stop = null, long Starved = 0,
