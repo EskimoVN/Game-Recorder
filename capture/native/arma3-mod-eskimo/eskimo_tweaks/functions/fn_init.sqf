@@ -5,6 +5,30 @@
 // respawn); this only fills its gaps: it is applied again every frame, as a mission may turn the HUD back on mid-round.
 if (!hasInterface) exitWith {};
 
+// Keys check for odx-app, on every server: the capture maps each physical key to the action of its profile
+// (capture/profiles/arma3.json), so a key rebound in Options > Controls records the wrong action. Every 30 s the actions
+// whose profile key no longer triggers them go to the .rpt ("ESKIMO,keys,ok" or "ESKIMO,keys,bad,<actions>"); odx-app
+// reads the last line and refuses ready while one is listed. An action the game does not know (no keys) is skipped, so a
+// wrong name here never blocks a player. Keys are DIK codes; 65536 is the left mouse button.
+[] spawn {
+    private _expected = [
+        ["MoveForward", "Forward", 17], ["MoveBack", "Backward", 31], ["TurnLeft", "Strafe Left", 30],
+        ["TurnRight", "Strafe Right", 32], ["LeanLeft", "Lean Left", 16], ["LeanRight", "Lean Right", 18],
+        ["ReloadMagazine", "Reload", 19], ["Throw", "Throw", 34], ["PersonView", "Toggle Third Person", 156],
+        ["DefaultAction", "Fire", 65536]
+    ];
+    while {true} do {
+        private _bad = [];
+        {
+            _x params ["_action", "_name", "_key"];
+            private _keys = actionKeys _action;
+            if (count _keys > 0 && {!(_key in _keys)}) then { _bad pushBack _name; };
+        } forEach _expected;
+        diag_log (if (_bad isEqualTo []) then { "ESKIMO,keys,ok" } else { "ESKIMO,keys,bad," + (_bad joinString ";") });
+        sleep 30;
+    };
+};
+
 [] spawn {
     waitUntil { !isNull player && {time > 0} };
 
