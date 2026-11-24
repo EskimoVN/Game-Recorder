@@ -725,6 +725,7 @@ public partial class MainWindow : Window
             _roundResult = ok ? t => t.RoundKept(session, dir) : t => t.RoundCaptureFailed(session, dir);
             ToastOverlay.Notify(ok, _roundResult(_t));
             if (_run is null) ShowAgentStatus();
+            QuickCheck(result);
         });
         // Once every player is done: the whole room's verdict, the same on every machine (who to record again, and why).
         agent.RoundFinished += record => Dispatcher.BeginInvoke(() =>
@@ -860,7 +861,9 @@ public partial class MainWindow : Window
         var clock = session.Agent.Clock;
         bool clockOff = _config.TimeServer is not null && clock is { Ok: false, NtpError: null };
         SyncClockButton.Visibility = clockOff && !_syncingClock ? Visibility.Visible : Visibility.Collapsed;
+        var quick = _quickCheck;
         SetStatus(t => t.RoomStatus(room.Code, room.Game, host, members) + (round is null ? "" : "\n" + round(t)) +
+                       (quick is null ? "" : "\n" + quick(t)) +
                        (_config.TimeServer is null ? "" : "\n" + (_syncingClock ? t.ClockSyncing : t.ClockLine(clock))) +
                        (session.Agent.Capture is { } capture ? "\n" + t.CaptureLine(capture) +
                                                                (capture.Audio is { } audio ? "\n" + t.AudioLine(audio) : "") : "") +
@@ -1015,6 +1018,7 @@ public partial class MainWindow : Window
         {
             _run = run;
             _roundResult = null;
+            WatchRecording(run);
             _runStarted = DateTime.Now;
             _clock.Start();
             if (_recordFrom is null) StartRecordTimer(_runStarted);  // else the 3-2-1 already set it

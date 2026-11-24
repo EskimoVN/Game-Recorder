@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Windows.Threading;
 using Odx.Capture;
+using Odx.Core;
 
 namespace Odx.App;
 
@@ -9,6 +10,7 @@ namespace Odx.App;
 /// Eskimo: this machine says ready, and the host starts a round, only with an exact 16:9 game frame and the profile's
 /// keys (RecordingGate). Checked when ready is pressed, every 2 s while ready between rounds (a resized window or a
 /// rebound key takes the player out of ready, so the room's own rule then holds the host's start), and on the host's start.
+/// While recording only notices; once the video is kept, the team's quick checks.
 /// </summary>
 public partial class MainWindow
 {
@@ -57,7 +59,21 @@ public partial class MainWindow
         _gateWindowSize = process is null ? null : ClientSize(process);
         if (probe is { Ok: true } p && !RecordingGate.Is16By9(p.Width, p.Height))
             return new GateProblem(_t.FrameNot16By9(p.Width, p.Height, p.WindowStyle == "windowed"), true);
+        if (probe is not null && AudioProblem(probe) is { } audio) return new GateProblem(audio, true);
         return await Task.Run(() => KeysProblem(process));
+    }
+
+    /// <summary>The video must carry the game's own sound only: the whole device's would bring in voices (Discord).</summary>
+    private string? AudioProblem(CaptureProbe probe)
+    {
+        if (_settings.RecordWithObs) return null;  // OBS records the sound itself
+        if (!_settings.RecordAudio) return _t.AudioOff;
+        return probe.Audio switch
+        {
+            null or { Source: AudioStatus.NotRecorded } => _t.AudioMissing(probe.Audio?.Error),
+            { Source: AudioStatus.FromProcess } => null,
+            var a => _t.AudioNotGameOnly(a.FallbackReason),
+        };
     }
 
     private GateProblem? KeysProblem(string? process)
@@ -94,6 +110,49 @@ public partial class MainWindow
         {
             _gateBusy = false;
         }
+    }
+
+    private Func<Strings, string>? _quickCheck;
+
+    /// <summary>
+    /// Notices over the game while recording only where they cannot get into the video: Windows 11 excludes overlays from
+    /// capture, and a window source never holds other windows (Windows 10 overlays stay capturable, see Overlay).
+    /// </summary>
+    private bool NoticeSafeWhileRecording() =>
+        OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000) ||
+        (_room?.Agent.Capture is { } capture && RecordingGate.WindowProcess(capture.Source) is not null);
+
+    /// <summary>A round's capture started: its live problems (CaptureReport.LiveProblem) show over the game.</summary>
+    private void WatchRecording(ICaptureRun run)
+    {
+        _quickCheck = null;
+        run.ProblemChanged += problem => Dispatcher.BeginInvoke(() =>
+        {
+            if (problem is not null && _run == run && NoticeSafeWhileRecording())
+                ToastOverlay.Notify(false, _t.RecordingWarning, _t.LiveProblem(problem));
+        });
+    }
+
+    /// <summary>The team's quick checks of this machine's video (RoundQuickCheck), once it is kept; the next round need not wait.</summary>
+    private async void QuickCheck(RunResult result)
+    {
+        var room = _room;
+        IReadOnlyList<QuickItem> items;
+        try
+        {
+            items = await Task.Run(() => RoundQuickCheck.Run(result, ExternalTools.Ffmpeg()));
+        }
+        catch (Exception e)
+        {
+            _log.Write($"quick check of {result.SessionDir} failed: {e.Message}");
+            return;
+        }
+        if (_run is not null || _room != room || room is null) return;  // the next round already records, or the room was left
+        int problems = items.Count(i => i.Level != QuickLevel.Ok);
+        _quickCheck = t => t.QuickTitle(problems) + "\n" + string.Join("\n", items.Select(t.QuickLine));
+        ToastOverlay.Notify(problems == 0, _t.QuickTitle(problems),
+            problems == 0 ? null : string.Join("\n", items.Where(i => i.Level != QuickLevel.Ok).Select(_t.QuickLine)));
+        if (_state == RunState.Agent) ShowAgentStatus();
     }
 
     private static (int Width, int Height)? ClientSize(string process)

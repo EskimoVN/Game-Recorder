@@ -48,7 +48,7 @@ jobs:
       - name: Unit tests
         shell: pwsh
         run: |
-          $filter = 'FullyQualifiedName~SessionBuilderTests|FullyQualifiedName~Arma3CameraTests|FullyQualifiedName~CaptureReportTests|FullyQualifiedName~RecordingGateTests|FullyQualifiedName~ValidatorTests.Each_violation_is_caught|' +
+          $filter = 'FullyQualifiedName~SessionBuilderTests|FullyQualifiedName~Arma3CameraTests|FullyQualifiedName~CaptureReportTests|FullyQualifiedName~RecordingGateTests|FullyQualifiedName~RoundQuickCheckTests|FullyQualifiedName~ValidatorTests.Each_violation_is_caught|' +
                     'FullyQualifiedName~ValidatorTests.Every_error_rule_has_a_mutator|FullyQualifiedName~ValidatorTests.Valid_session_has_no_issues'
           dotnet test capture/dotnet/tests/Odx.Tests --filter $filter
           if ($LASTEXITCODE -ne 0) { throw 'unit tests failed' }
@@ -57,8 +57,13 @@ jobs:
         shell: pwsh
         run: gh release download $env:BASE_TAG -R trquoccuong/Game-Recorder -p 'odx-capture-*-win-x64.zip' -D base
 
+      # The runner's current Windows SDK projection marks GraphicsCaptureSession.IsBorderRequired as 20348+, so CA1416 fails
+      # the upstream recorder (odx record), unchanged since it built (it already sits in a try/catch for older Windows).
+      # Kept a warning here only, through the WarningsNotAsErrors property; the upstream source stays as it is.
       - name: Build the package
         shell: pwsh
+        env:
+          WarningsNotAsErrors: CA1416
         run: |
           $base = (Get-ChildItem base -Filter '*.zip' | Select-Object -First 1).FullName
           ./capture/dotnet/build-package.ps1 -Base $base -Version $env:VERSION

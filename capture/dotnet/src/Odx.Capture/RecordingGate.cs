@@ -27,12 +27,7 @@ public static class RecordingGate
     /// <summary>The actions whose profile key no longer triggers them, from the last keys line; null when they all do or there is none.</summary>
     public static IReadOnlyList<string>? Arma3ReboundActions(string rptText)
     {
-        int at = rptText.LastIndexOf(Arma3KeysTag, StringComparison.Ordinal);
-        if (at < 0) return null;
-        int start = at + Arma3KeysTag.Length;
-        int end = rptText.IndexOfAny(['"', '\r', '\n'], start);
-        string result = rptText[start..(end < 0 ? rptText.Length : end)];
-        if (!result.StartsWith("bad,", StringComparison.Ordinal)) return null;
+        if (LastValue(rptText, Arma3KeysTag) is not { } result || !result.StartsWith("bad,", StringComparison.Ordinal)) return null;
         var actions = result["bad,".Length..].Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         return actions.Length > 0 ? actions : null;
     }
@@ -45,15 +40,26 @@ public static class RecordingGate
         confText.Contains("mouse:", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Arma 3's rebound actions on this machine: from the newest .rpt of the running game; null when none or unknown.</summary>
-    public static IReadOnlyList<string>? Arma3ReboundActionsNow()
+    public static IReadOnlyList<string>? Arma3ReboundActionsNow() => NewestRpt() is { } rpt ? Arma3ReboundActions(ReadTail(rpt)) : null;
+
+    private static string? LastValue(string rptText, string tag)
+    {
+        int at = rptText.LastIndexOf(tag, StringComparison.Ordinal);
+        if (at < 0) return null;
+        int start = at + tag.Length;
+        int end = rptText.IndexOfAny(['"', '\r', '\n'], start);
+        return rptText[start..(end < 0 ? rptText.Length : end)];
+    }
+
+    /// <summary>The .rpt of the running game: the newest one written since it started.</summary>
+    private static string? NewestRpt()
     {
         var started = ProcessStart(Arma3Process);
         if (started is null) return null;
         var dir = new DirectoryInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Arma 3"));
         if (!dir.Exists) return null;
-        var rpt = dir.EnumerateFiles("*.rpt").Where(f => f.LastWriteTimeUtc >= started.Value)
-            .OrderByDescending(f => f.LastWriteTimeUtc).FirstOrDefault();
-        return rpt is null ? null : Arma3ReboundActions(ReadTail(rpt.FullName));
+        return dir.EnumerateFiles("*.rpt").Where(f => f.LastWriteTimeUtc >= started.Value)
+            .OrderByDescending(f => f.LastWriteTimeUtc).FirstOrDefault()?.FullName;
     }
 
     /// <summary>The InputUserSettings.conf with rebound keys under the OdxReforger profile, or null.</summary>

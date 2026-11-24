@@ -125,6 +125,14 @@ public sealed class Strings
     public required Func<int, int, bool, string> FrameNot16By9 { get; init; }
     public required Func<string, string> Arma3KeysRebound { get; init; }
     public required Func<string, string> ReforgerKeysRebound { get; init; }
+    public required string AudioOff { get; init; }
+    public required Func<string?, string> AudioMissing { get; init; }
+    public required Func<string?, string> AudioNotGameOnly { get; init; }
+    public required string RecordingWarning { get; init; }
+    /// <summary>CaptureReport.LiveProblem's text (encoder behind, late start, silent audio) for the player.</summary>
+    public required Func<string, string> LiveProblem { get; init; }
+    public required Func<int, string> QuickTitle { get; init; }
+    public required Func<Odx.Capture.QuickItem, string> QuickLine { get; init; }
     public required Func<string, string> EndRound { get; init; }
     public required Func<string, string> ReadyButton { get; init; }
     public required Func<string, string> UnreadyButton { get; init; }
@@ -277,6 +285,15 @@ public sealed class Strings
             (windowed ? " (windowed: the area inside the window counts, without the title bar)" : "") + ", then press ready again",
         Arma3KeysRebound = actions => $"Arma 3 keys changed: {actions}. Options > Controls: set them back to the default keys",
         ReforgerKeysRebound = file => $"Arma Reforger keys changed ({file}). Settings > Controls: reset to the default keys",
+        AudioOff = "Tick \"Record audio\": the video must have the game's sound",
+        AudioMissing = error => $"The game's sound cannot be recorded{(error is null ? "" : $" ({error})")}: check the game's sound and the playback device",
+        AudioNotGameOnly = reason => $"Only the whole PC's sound can be recorded, so voices (Discord) would get in{(reason is null ? "" : $" ({reason})")}. Restart the game, then press ready again",
+        RecordingWarning = "Recording warning",
+        LiveProblem = p => p.StartsWith("encoder behind", StringComparison.Ordinal) ? "Frames are being dropped (stutter): close heavy apps"
+            : p.StartsWith("late start", StringComparison.Ordinal) ? "The video starts black: the game window was not shown"
+            : p.StartsWith("audio:", StringComparison.Ordinal) ? "No game sound for 15 s: check the game's volume" : p,
+        QuickTitle = problems => problems == 0 ? "Quick check: PASS" : $"Quick check: {problems} problem(s)",
+        QuickLine = i => QuickLineText(i, false),
         TaskIdRequired = "Enter the task ID (the round's folder name: letters, digits, _ . -) before starting the round",
         EndRound = hotkey => $"End round ({hotkey})",
         ReadyButton = hotkey => $"I'm ready ({hotkey})",
@@ -443,6 +460,15 @@ public sealed class Strings
             (windowed ? " (chế độ Window: tính phần trong cửa sổ, không tính thanh tiêu đề)" : "") + " rồi bấm Sẵn sàng lại.",
         Arma3KeysRebound = actions => $"Phím Arma 3 đã bị đổi: {actions}. Vào Options > Controls, đặt lại phím mặc định.",
         ReforgerKeysRebound = file => $"Phím Arma Reforger đã bị đổi ({file}). Vào Settings > Controls, đặt lại phím mặc định.",
+        AudioOff = "Tick \"Record audio\": video phải có tiếng game.",
+        AudioMissing = error => $"Không ghi được tiếng game{(error is null ? "" : $" ({error})")}. Kiểm tra tiếng game và thiết bị phát âm thanh.",
+        AudioNotGameOnly = reason => $"Chỉ ghi được tiếng cả máy, tiếng Discord sẽ lọt vào video{(reason is null ? "" : $" ({reason})")}. Mở lại game rồi bấm Sẵn sàng lại.",
+        RecordingWarning = "Cảnh báo khi quay",
+        LiveProblem = p => p.StartsWith("encoder behind", StringComparison.Ordinal) ? "Đang mất frame, video bị giật. Tắt bớt ứng dụng nặng."
+            : p.StartsWith("late start", StringComparison.Ordinal) ? "Đầu video bị đen: cửa sổ game chưa hiện."
+            : p.StartsWith("audio:", StringComparison.Ordinal) ? "Không có tiếng game 15 giây. Kiểm tra âm lượng game." : p,
+        QuickTitle = problems => problems == 0 ? "Kiểm nhanh: ĐẠT" : $"Kiểm nhanh: {problems} lỗi/cảnh báo",
+        QuickLine = i => QuickLineText(i, true),
         TaskIdRequired = "Nhập Task ID (tên thư mục của round: chữ, số, _ . -) rồi mới bắt đầu round",
         EndRound = hotkey => $"Kết thúc round ({hotkey})",
         ReadyButton = hotkey => $"Tôi sẵn sàng ({hotkey})",
@@ -549,4 +575,27 @@ public sealed class Strings
 
     /// <summary>Beyond this the Windows clock is badly synced; NTP still fixes the session times, but other tools use it.</summary>
     public const double ClockWarningMs = 1000;
+
+    private static string QuickLineText(Odx.Capture.QuickItem i, bool vi)
+    {
+        string mark = i.Level switch
+        {
+            Odx.Capture.QuickLevel.Ok => vi ? "ĐẠT" : "PASS",
+            Odx.Capture.QuickLevel.Warn => vi ? "CẢNH BÁO" : "WARN",
+            _ => vi ? "LỖI" : "FAIL",
+        };
+        string text = i.Id switch
+        {
+            "fps" => $"FPS {i.Value}",
+            "size" => (vi ? "Khung hình " : "Frame ") + i.Value,
+            "freeze" => (vi ? "Đứng hình dài nhất " : "Longest freeze ") + i.Value + " ms",
+            "audio_track" => (vi ? "Track âm thanh: " : "Audio tracks: ") + i.Value,
+            "silence" => (vi ? "Im lặng dài nhất " : "Longest silence ") + i.Value + (i.Value.EndsWith('%') ? "" : " s"),
+            "volume" => (vi ? "Âm lượng TB " : "Mean volume ") + i.Value + " dB",
+            "clipping" => (vi ? "Đỉnh âm thanh " : "Audio peak ") + i.Value + " dB" +
+                          (i.Level == Odx.Capture.QuickLevel.Ok ? "" : vi ? " (vỡ tiếng: giảm âm lượng game)" : " (clipping: lower the game's volume)"),
+            _ => $"{i.Id} {i.Value}",
+        };
+        return $"{mark} {text}";
+    }
 }
