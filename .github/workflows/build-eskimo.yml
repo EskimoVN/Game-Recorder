@@ -48,7 +48,7 @@ jobs:
       - name: Unit tests
         shell: pwsh
         run: |
-          $filter = 'FullyQualifiedName~SessionBuilderTests|FullyQualifiedName~Arma3CameraTests|FullyQualifiedName~CaptureReportTests|FullyQualifiedName~ValidatorTests.Each_violation_is_caught|' +
+          $filter = 'FullyQualifiedName~SessionBuilderTests|FullyQualifiedName~Arma3CameraTests|FullyQualifiedName~CaptureReportTests|FullyQualifiedName~RecordingGateTests|FullyQualifiedName~ValidatorTests.Each_violation_is_caught|' +
                     'FullyQualifiedName~ValidatorTests.Every_error_rule_has_a_mutator|FullyQualifiedName~ValidatorTests.Valid_session_has_no_issues'
           dotnet test capture/dotnet/tests/Odx.Tests --filter $filter
           if ($LASTEXITCODE -ne 0) { throw 'unit tests failed' }

@@ -135,6 +135,7 @@ public partial class MainWindow : Window
             ShowRecordTimer();
             CheckAutoStop();
         };
+        StartReadyGate();
 
         _trayStartStop.Click += (_, _) => Toggle();
         using (var icon = System.Windows.Application.GetResourceStream(new Uri("pack://application:,,,/odx.ico")).Stream)
@@ -885,6 +886,7 @@ public partial class MainWindow : Window
     private async void ToggleReady()
     {
         if (_room is not { } room) return;
+        if (!room.Agent.IsReady && !await PassesGateAsync(room, _t.NotReadyTitle)) return;
         await room.ToggleReadyAsync();
         if (_run is null) ShowAgentStatus();
     }
@@ -954,6 +956,8 @@ public partial class MainWindow : Window
                 ToastOverlay.Notify(false, _t.TaskNotStarted, problem);
                 return;
             }
+            // Re-checked after the probe: a round may have started meanwhile, and this press would then end it.
+            if (!await PassesGateAsync(room, _t.TaskNotStarted) || room.Agent.Room is not { CurrentSession: null }) return;
             _pendingTask = task;
         }
         SendToggleRound(room, task);

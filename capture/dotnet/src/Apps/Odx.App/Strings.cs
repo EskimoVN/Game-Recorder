@@ -120,6 +120,11 @@ public sealed class Strings
     public required string TaskBatchInvalid { get; init; }
     public required Func<string, string> TaskBatchFull { get; init; }
     public required string TaskNotStarted { get; init; }
+    // Eskimo: why this machine may not be ready, or the host may not start (RecordingGate).
+    public required string NotReadyTitle { get; init; }
+    public required Func<int, int, bool, string> FrameNot16By9 { get; init; }
+    public required Func<string, string> Arma3KeysRebound { get; init; }
+    public required Func<string, string> ReforgerKeysRebound { get; init; }
     public required Func<string, string> EndRound { get; init; }
     public required Func<string, string> ReadyButton { get; init; }
     public required Func<string, string> UnreadyButton { get; init; }
@@ -267,6 +272,11 @@ public sealed class Strings
         TaskBatchInvalid = "Batch code: letters, digits, _ . - only, starting with a letter or digit, not ending with a dot",
         TaskBatchFull = batch => $"Batch {batch} has its 15 videos: type the next batch code",
         TaskNotStarted = "Round not started",
+        NotReadyTitle = "Not ready",
+        FrameNot16By9 = (w, h, windowed) => $"The game frame is {w}x{h}, not exactly 16:9: set the game to 1920x1080 or 1600x900" +
+            (windowed ? " (windowed: the area inside the window counts, without the title bar)" : "") + ", then press ready again",
+        Arma3KeysRebound = actions => $"Arma 3 keys changed: {actions}. Options > Controls: set them back to the default keys",
+        ReforgerKeysRebound = file => $"Arma Reforger keys changed ({file}). Settings > Controls: reset to the default keys",
         TaskIdRequired = "Enter the task ID (the round's folder name: letters, digits, _ . -) before starting the round",
         EndRound = hotkey => $"End round ({hotkey})",
         ReadyButton = hotkey => $"I'm ready ({hotkey})",
@@ -428,6 +438,11 @@ public sealed class Strings
         TaskBatchInvalid = "Mã lô chỉ gồm chữ, số, _ . -, bắt đầu bằng chữ hoặc số, không kết thúc bằng dấu chấm",
         TaskBatchFull = batch => $"Lô {batch} đã đủ 15 video: nhập mã lô tiếp theo",
         TaskNotStarted = "Round chưa bắt đầu",
+        NotReadyTitle = "Chưa sẵn sàng",
+        FrameNot16By9 = (w, h, windowed) => $"Khung hình game {w}x{h} không đúng 16:9. Chỉnh game về 1920x1080 hoặc 1600x900" +
+            (windowed ? " (chế độ Window: tính phần trong cửa sổ, không tính thanh tiêu đề)" : "") + " rồi bấm Sẵn sàng lại.",
+        Arma3KeysRebound = actions => $"Phím Arma 3 đã bị đổi: {actions}. Vào Options > Controls, đặt lại phím mặc định.",
+        ReforgerKeysRebound = file => $"Phím Arma Reforger đã bị đổi ({file}). Vào Settings > Controls, đặt lại phím mặc định.",
         TaskIdRequired = "Nhập Task ID (tên thư mục của round: chữ, số, _ . -) rồi mới bắt đầu round",
         EndRound = hotkey => $"Kết thúc round ({hotkey})",
         ReadyButton = hotkey => $"Tôi sẵn sàng ({hotkey})",
