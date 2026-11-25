@@ -4,15 +4,53 @@
         Title="Odx Capture countdown" WindowStyle="None" AllowsTransparency="True" Background="Transparent"
         Topmost="True" ShowInTaskbar="False" ShowActivated="False" ResizeMode="NoResize"
         SizeToContent="WidthAndHeight" WindowStartupLocation="CenterScreen" IsHitTestVisible="False"
-        UseLayoutRounding="True">
-    <Border Background="{StaticResource OverlayGlassBrush}" BorderBrush="{StaticResource HairlineBrush}" BorderThickness="1"
-            CornerRadius="24" MinWidth="180" Height="180" Padding="32,0">
+        FontFamily="Segoe UI" UseLayoutRounding="True">
+    <!-- Eskimo 1.0.0: every text sits in a DownOnly Viewbox under a fixed width, so a long label (a round's name, a
+         translation) shrinks to fit instead of running out of the frame. -->
+    <Border x:Name="Frame" Background="{StaticResource OverlayGlassBrush}" BorderBrush="{StaticResource HairlineBrush}"
+            BorderThickness="2" CornerRadius="28">
         <Grid>
-            <TextBlock x:Name="Number" Foreground="{StaticResource TextBrush}" FontFamily="Segoe UI" FontSize="110"
-                       FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center"
-                       TextOptions.TextFormattingMode="Ideal" />
-            <Border Width="36" Height="3" CornerRadius="1.5" Background="{StaticResource AccentBrush}"
-                    HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,20" />
+            <!-- A countdown: label, then the seconds left inside a ring that empties second by second. -->
+            <StackPanel x:Name="CountPanel" Width="220" Margin="0,16,0,20">
+                <Viewbox StretchDirection="DownOnly" MaxWidth="188" HorizontalAlignment="Center">
+                    <TextBlock x:Name="CountLabel" FontSize="19" FontWeight="Bold" />
+                </Viewbox>
+                <Grid Width="150" Height="150" Margin="0,8,0,0">
+                    <Ellipse Stroke="{StaticResource HairlineBrush}" StrokeThickness="8" />
+                    <Ellipse x:Name="Ring" StrokeThickness="8" StrokeDashCap="Round" RenderTransformOrigin="0.5,0.5">
+                        <Ellipse.RenderTransform>
+                            <RotateTransform Angle="-90" />
+                        </Ellipse.RenderTransform>
+                    </Ellipse>
+                    <Viewbox StretchDirection="DownOnly" MaxWidth="104" MaxHeight="104">
+                        <TextBlock x:Name="Number" Foreground="{StaticResource TextBrush}" FontSize="84" FontWeight="SemiBold"
+                                   TextOptions.TextFormattingMode="Ideal" />
+                    </Viewbox>
+                </Grid>
+            </StackPanel>
+
+            <!-- After the stop: "END" with the recorded time, then saving the video (percent) and building the session. -->
+            <StackPanel x:Name="BadgePanel" Visibility="Collapsed" MinWidth="220" Margin="36,22,36,24">
+                <Viewbox x:Name="BadgeLabelBox" StretchDirection="DownOnly" MaxWidth="400" HorizontalAlignment="Center">
+                    <TextBlock x:Name="BadgeLabel" FontSize="19" FontWeight="Bold" Foreground="{StaticResource TextSecondaryBrush}" />
+                </Viewbox>
+                <Viewbox StretchDirection="DownOnly" MaxWidth="400" HorizontalAlignment="Center">
+                    <StackPanel Orientation="Horizontal">
+                        <Ellipse x:Name="EndDot" Width="14" Height="14" Margin="0,0,12,0" VerticalAlignment="Center"
+                                 Fill="{StaticResource RecordBrush}" />
+                        <TextBlock x:Name="BadgeTitle" Foreground="{StaticResource TextBrush}" FontWeight="Bold"
+                                   TextOptions.TextFormattingMode="Ideal" />
+                    </StackPanel>
+                </Viewbox>
+                <Viewbox x:Name="BadgeDetailBox" StretchDirection="DownOnly" MaxWidth="400" HorizontalAlignment="Center"
+                         Margin="0,4,0,0">
+                    <TextBlock x:Name="BadgeDetail" FontSize="19" Foreground="{StaticResource TextMutedBrush}" />
+                </Viewbox>
+                <Grid x:Name="Progress" Width="220" Height="6" Margin="0,12,0,0">
+                    <Border CornerRadius="3" Background="{StaticResource HairlineBrush}" />
+                    <Border x:Name="ProgressFill" CornerRadius="3" HorizontalAlignment="Left" Background="{StaticResource ShiroBrush}" />
+                </Grid>
+            </StackPanel>
         </Grid>
     </Border>
 </Window>

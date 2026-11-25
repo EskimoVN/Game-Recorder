@@ -157,7 +157,14 @@ public sealed class Strings
     public required Func<string, string> RoundToggleFailed { get; init; }
     public required Func<string, string> TrayTooltip { get; init; }
     public required string EndOverlay { get; init; }
-    public required Func<int, string> FinalizingOverlay { get; init; }
+    // Eskimo 1.0.0: the labels of the on-screen countdown and of the steps after the stop (CountdownOverlay).
+    public required string CountdownStartLabel { get; init; }
+    public required string AutoStopLabel { get; init; }
+    /// <summary>A room's 3-2-1: the round's name when the room already shows it.</summary>
+    public required Func<string?, string> RoundStartLabel { get; init; }
+    /// <summary>Under "END": the recorded time.</summary>
+    public required Func<string, string> EndDetail { get; init; }
+    public required string SavingOverlay { get; init; }
     public required string BuildingOverlay { get; init; }
     public required string NotifySavedPass { get; init; }
     public required string NotifySavedRaw { get; init; }
@@ -332,8 +339,12 @@ public sealed class Strings
         RoundToggleFailed = error => $"Could not start/end the round: {error}",
         TrayTooltip = state => $"{Brand.Name}: {state}",
         EndOverlay = "END",
-        FinalizingOverlay = percent => $"Video {percent} %",
-        BuildingOverlay = "Session…",
+        CountdownStartLabel = "RECORDING IN",
+        AutoStopLabel = "AUTO-STOP IN",
+        RoundStartLabel = session => session is null ? "ROUND STARTS" : $"ROUND {session}",
+        EndDetail = time => $"Recording stopped · {time}",
+        SavingOverlay = "SAVING VIDEO",
+        BuildingOverlay = "BUILDING SESSION",
         NotifySavedPass = "Recording saved · validation PASS",
         NotifySavedRaw = "Recording saved (raw capture)",
         NotifyFailed = "Recording stopped with errors",
@@ -519,8 +530,12 @@ public sealed class Strings
         RoundToggleFailed = error => $"Không bắt đầu/kết thúc được round: {error}",
         TrayTooltip = state => $"{Brand.Name}: {state}",
         EndOverlay = "KẾT THÚC",
-        FinalizingOverlay = percent => $"Video {percent} %",
-        BuildingOverlay = "Session…",
+        CountdownStartLabel = "BẮT ĐẦU QUAY",
+        AutoStopLabel = "TỰ DỪNG SAU",
+        RoundStartLabel = session => session is null ? "BẮT ĐẦU ROUND" : $"ROUND {session}",
+        EndDetail = time => $"Đã dừng quay · {time}",
+        SavingOverlay = "ĐANG LƯU VIDEO",
+        BuildingOverlay = "ĐANG TẠO SESSION",
         NotifySavedPass = "Đã lưu bản ghi · Kiểm tra ĐẠT",
         NotifySavedRaw = "Đã lưu bản ghi (dữ liệu thô)",
         NotifyFailed = "Bản ghi có lỗi",
@@ -561,15 +576,6 @@ public sealed class Strings
     };
 
     /// <summary>Title and text of the Windows notification shown when a recording is finished.</summary>
-    /// <summary>The processing badge's text after the round; null once the run is done (the badge closes).</summary>
-    public string? PhaseOverlay(CapturePhase phase, int percent) => phase switch
-    {
-        CapturePhase.Finalizing => FinalizingOverlay(percent),
-        CapturePhase.Building => BuildingOverlay,
-        CapturePhase.Done => null,
-        _ => EndOverlay,
-    };
-
     /// <summary>The status line while a recording is stopped, finalized and built.</summary>
     public string PhaseStatus(CapturePhase phase, int percent) => phase switch
     {

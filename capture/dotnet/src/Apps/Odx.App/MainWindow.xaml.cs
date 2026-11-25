@@ -468,7 +468,7 @@ public partial class MainWindow : Window
 
     private void ShowCountdown()
     {
-        _overlay!.Seconds = _countdownLeft;
+        _overlay!.ShowCount(CountdownTone.Start, _t.CountdownStartLabel, _countdownLeft, CountdownSeconds);
         int left = _countdownLeft;
         SetStatus(t => t.CountdownStatus(left));
     }
@@ -529,13 +529,19 @@ public partial class MainWindow : Window
     /// </summary>
     private void ShowProcessingBadge(ICaptureRun run)
     {
-        var badge = new CountdownOverlay { Text = _t.EndOverlay };
+        var badge = new CountdownOverlay();
+        string recorded = RecordTimerText.Text;
+        badge.ShowEnd(_t.EndOverlay, _t.EndDetail(recorded));
         badge.Show();
         void Update()
         {
-            string? text = _t.PhaseOverlay(run.Phase, run.FinalizePercent);
-            if (text is null) badge.Close();
-            else badge.Text = text;
+            switch (run.Phase)
+            {
+                case CapturePhase.Done: badge.Close(); break;
+                case CapturePhase.Finalizing: badge.ShowProgress(_t.SavingOverlay, run.FinalizePercent); break;
+                case CapturePhase.Building: badge.ShowProgress(_t.BuildingOverlay, null); break;
+                default: badge.ShowEnd(_t.EndOverlay, _t.EndDetail(recorded)); break;
+            }
         }
         var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1.5) };
         timer.Tick += (_, _) =>
@@ -648,7 +654,8 @@ public partial class MainWindow : Window
                 _autoStopOverlay = new CountdownOverlay();
                 _autoStopOverlay.Show();
             }
-            _autoStopOverlay.Seconds = (int)Math.Ceiling(left.TotalSeconds);
+            _autoStopOverlay.ShowCount(CountdownTone.Stop, _t.AutoStopLabel, (int)Math.Ceiling(left.TotalSeconds),
+                AutoStopWarnSeconds);
             return;
         }
         CloseAutoStopOverlay();
@@ -1051,7 +1058,10 @@ public partial class MainWindow : Window
         int left = (int)Math.Ceiling(countdownMs / 1000.0);
         // The delivered video starts at round_start, the end of the 3-2-1: the recording time counts from there too.
         StartRecordTimer(DateTime.Now.AddMilliseconds(countdownMs));
-        var overlay = new CountdownOverlay { Seconds = left };
+        int total = left;
+        string label = _t.RoundStartLabel(_agent?.Room?.CurrentSession);
+        var overlay = new CountdownOverlay();
+        overlay.ShowCount(CountdownTone.Start, label, left, total);
         var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(countdownMs / (double)left) };
         bool closed = false;
         void End()
@@ -1063,7 +1073,7 @@ public partial class MainWindow : Window
         }
         timer.Tick += (_, _) =>
         {
-            if (--left > 0) overlay.Seconds = left;
+            if (--left > 0) overlay.ShowCount(CountdownTone.Start, label, left, total);
             else End();
         };
         cancelled.Register(() => Dispatcher.BeginInvoke(() =>
