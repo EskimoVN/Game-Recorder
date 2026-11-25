@@ -74,7 +74,7 @@ jobs:
         shell: pwsh
         run: |
           $pkg = "capture/dotnet/dist/odx-capture-$env:VERSION-win-x64"
-          $expected = 'Eskimo Capture'
+          $expected = 'Odx Capture'
           New-Item -ItemType Directory -Force smoke | Out-Null
           $app = Start-Process (Resolve-Path "$pkg/bin/odx-app.exe") -PassThru
           $title = ''
