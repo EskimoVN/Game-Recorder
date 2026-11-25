@@ -157,6 +157,23 @@ public class RoundQuickCheckTests
     }
 
     [Fact]
+    public void A_failed_capture_reports_its_video_only()
+    {
+        string dir = Directory.CreateTempSubdirectory("odx-quick-").FullName;
+        try
+        {
+            var failed = new RunResult(dir, false, null, 0, [], null, "recorder exited");
+            Assert.Equal(new[] { new QuickItem("size", QuickLevel.Fail, "no video.mp4") }, RoundQuickCheck.Run(failed, "ffmpeg"));
+            var kept = RoundQuickCheck.Run(failed with { CaptureOk = true }, "ffmpeg");
+            Assert.Equal(new[] { "size", "input_keys", "input_mouse", "files" }, kept.Select(i => i.Id));
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
     public void Required_files_are_the_delivered_ones_but_the_room_events()
     {
         Assert.Equal(CaptureFolder.Delivered.Where(n => n != "events.jsonl"), RoundQuickCheck.RequiredFiles);

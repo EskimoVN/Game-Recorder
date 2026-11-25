@@ -27,12 +27,14 @@ public static partial class RoundQuickCheck
 
     /// <summary>
     /// The delivered files (CaptureFolder.Delivered) but events.jsonl: the agent writes it once the whole room is done
-    /// (AgentClient.KeepRoundFiles), after this check runs.
+    /// (AgentClient.KeepRoundFiles), which may be after or while this check runs.
     /// </summary>
     public static readonly IReadOnlyList<string> RequiredFiles = [.. CaptureFolder.Delivered.Where(n => n != "events.jsonl")];
 
-    public static IReadOnlyList<QuickItem> Run(RunResult result, string ffmpeg) =>
-        [.. Recording(result, ffmpeg), .. Input(result.SessionDir), Files(result.SessionDir)];
+    /// <summary>A failed capture builds no session, so only its video is checked: input and files would only repeat the failure.</summary>
+    public static IReadOnlyList<QuickItem> Run(RunResult result, string ffmpeg) => result.CaptureOk
+        ? [.. Recording(result, ffmpeg), .. Input(result.SessionDir), Files(result.SessionDir)]
+        : Recording(result, ffmpeg);
 
     /// <summary>
     /// Frames with a key and frames with mouse movement, counted as the company's merge counts them for frame_stats
