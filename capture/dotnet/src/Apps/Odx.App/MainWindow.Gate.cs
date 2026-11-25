@@ -129,6 +129,7 @@ public partial class MainWindow
     {
         _quickItems = null;
         ShowQuickCheck();
+        SetRows(_rows);
         run.ProblemChanged += problem => Dispatcher.BeginInvoke(() =>
         {
             if (problem is not null && _run == run && NoticeSafeWhileRecording())

@@ -221,11 +221,12 @@ public partial class MainWindow : Window
         StatusText.Text = status(_t);
     }
 
+    /// <summary>Hidden while this machine records: the status line then shows the recording, the rows would go stale.</summary>
     private void SetRows(Func<Strings, IReadOnlyList<StatusRow>>? rows)
     {
         _rows = rows;
         RoomRows.ItemsSource = rows?.Invoke(_t);
-        RoomRows.Visibility = rows is null ? Visibility.Collapsed : Visibility.Visible;
+        RoomRows.Visibility = rows is null || _run is not null ? Visibility.Collapsed : Visibility.Visible;
     }
 
     protected override void OnSourceInitialized(EventArgs e)
@@ -933,7 +934,7 @@ public partial class MainWindow : Window
     {
         int colon = line.IndexOf(": ", StringComparison.Ordinal);
         string text = colon < 0 ? line : line[(colon + 2)..];
-        return text.EndsWith(" ✓", StringComparison.Ordinal) ? text[..^2] : text;
+        return text.Replace(" ✓", "", StringComparison.Ordinal);
     }
 
     private bool _syncingClock;
