@@ -21,12 +21,12 @@ public partial class CountdownOverlay : Window
     public CountdownOverlay()
     {
         InitializeComponent();
-        // SizeToContent changes the size with the content (countdown, END, saving): keep it centred.
+        // SizeToContent changes the size with the content (countdown, END, saving): keep it centred on the whole
+        // primary screen, as CenterScreen does (the game covers the taskbar).
         SizeChanged += (_, _) =>
         {
-            var area = SystemParameters.WorkArea;
-            Left = area.Left + (area.Width - ActualWidth) / 2;
-            Top = area.Top + (area.Height - ActualHeight) / 2;
+            Left = (SystemParameters.PrimaryScreenWidth - ActualWidth) / 2;
+            Top = (SystemParameters.PrimaryScreenHeight - ActualHeight) / 2;
         };
     }
 

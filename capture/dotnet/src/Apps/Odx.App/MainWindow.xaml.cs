@@ -448,6 +448,7 @@ public partial class MainWindow : Window
         _countdownLeft = CountdownSeconds;
         RecordTimerText.Text = FormatRecordTime(TimeSpan.Zero);
         _overlay = new CountdownOverlay();
+        _overlay.ShowCount(CountdownTone.Start, _t.CountdownStartLabel, _countdownLeft, CountdownSeconds);
         _overlay.Show();
         _countdown = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _countdown.Tick += (_, _) =>
@@ -649,13 +650,11 @@ public partial class MainWindow : Window
         if (left > TimeSpan.Zero)
         {
             if (_autoStopSent) return;
-            if (_autoStopOverlay is null)
-            {
-                _autoStopOverlay = new CountdownOverlay();
-                _autoStopOverlay.Show();
-            }
+            bool first = _autoStopOverlay is null;
+            _autoStopOverlay ??= new CountdownOverlay();
             _autoStopOverlay.ShowCount(CountdownTone.Stop, _t.AutoStopLabel, (int)Math.Ceiling(left.TotalSeconds),
                 AutoStopWarnSeconds);
+            if (first) _autoStopOverlay.Show();
             return;
         }
         CloseAutoStopOverlay();
