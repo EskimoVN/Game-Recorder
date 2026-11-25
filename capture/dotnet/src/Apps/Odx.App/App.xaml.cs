@@ -60,7 +60,7 @@ public partial class App : Application
         {
             // The dialog below still shows the error.
         }
-        MessageBox.Show($"Odx Capture: {what}\n\n{ex.Message}\n\nDetails: {Odx.Core.PackageFolders.Logs}",
-            "Odx Capture - error", MessageBoxButton.OK, MessageBoxImage.Error);
+        MessageBox.Show($"{Brand.Name}: {what}\n\n{ex.Message}\n\nDetails: {Odx.Core.PackageFolders.Logs}",
+            $"{Brand.Name} - error", MessageBoxButton.OK, MessageBoxImage.Error);
     }
 }

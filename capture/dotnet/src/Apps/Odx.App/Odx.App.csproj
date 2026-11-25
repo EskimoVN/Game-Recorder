@@ -17,6 +17,8 @@
     <!-- Window background (Dango theme): dark, faint glow top right; text sits on opaque cards above it. -->
     <Resource Include="bg.jpg" />
     <Resource Include="header.png" />
+    <!-- Eskimo 1.0.0: the team logo in the header (odx.ico and splash.png carry it too). -->
+    <Resource Include="logo.png" />
     <!-- Shown by WPF as soon as the runtime starts, before the main window is built; fades out when it appears. -->
     <SplashScreen Include="splash.png" />
   </ItemGroup>

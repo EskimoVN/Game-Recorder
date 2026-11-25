@@ -57,6 +57,16 @@
         <SolidColorBrush x:Key="ShiroBrush" Color="#F3E9D2" />
         <SolidColorBrush x:Key="MatchaSoftBrush" Color="#8CC79A" />
         <SolidColorBrush x:Key="RecordChipBrush" Color="#33F25450" />
+        <!-- Eskimo 1.0.0: marks of the status rows and the quick-check card (green OK, amber warning, red failure). -->
+        <SolidColorBrush x:Key="WarnBrush" Color="#F2B85C" />
+        <SolidColorBrush x:Key="WarnInkBrush" Color="#1F1405" />
+        <SolidColorBrush x:Key="FailInkBrush" Color="#1A0708" />
+        <SolidColorBrush x:Key="OkPanelBrush" Color="#294FA872" />
+        <SolidColorBrush x:Key="OkPanelLineBrush" Color="#8C8CC79A" />
+        <SolidColorBrush x:Key="WarnPanelBrush" Color="#1FF2B85C" />
+        <SolidColorBrush x:Key="WarnPanelLineBrush" Color="#8CF2B85C" />
+        <SolidColorBrush x:Key="FailPanelBrush" Color="#1FF25450" />
+        <SolidColorBrush x:Key="FailPanelLineBrush" Color="#8CF25450" />
         <LinearGradientBrush x:Key="MatchaGradientBrush" StartPoint="0,0" EndPoint="0,1">
             <GradientStop Color="#9ED3AB" Offset="0" />
             <GradientStop Color="#7CB98A" Offset="1" />

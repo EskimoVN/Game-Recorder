@@ -67,6 +67,8 @@ public partial class MainWindow : Window
     private Strings _t = Strings.En;
     /// <summary>Renders the status line; kept so a language switch re-renders it.</summary>
     private Func<Strings, string> _status = t => t.Ready;
+    /// <summary>Eskimo: renders the room's status rows; null outside a room.</summary>
+    private Func<Strings, IReadOnlyList<StatusRow>>? _rows;
     private IntPtr _hook;
     private LowLevelKeyboardProc? _hookProc;
     /// <summary>Set while the hotkey box is being rebound, so the pressed combination assigns instead of toggling.</summary>
@@ -99,6 +101,9 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        int space = Brand.Name.IndexOf(' ');
+        BrandFirst.Text = space < 0 ? Brand.Name : Brand.Name[..space];
+        BrandRest.Text = space < 0 ? "" : Brand.Name[space..];
         Overlay.Log = _log.Write;
         _obsRows = _settings.RecordWithObs;
         _t = Strings.For(_settings.Language ?? Strings.DefaultLanguage);
@@ -197,6 +202,8 @@ public partial class MainWindow : Window
         LoadGames();
         SetState(_state);
         SetStatus(_status);
+        SetRows(_rows);
+        ShowQuickCheck();
     }
 
     private void Language_Changed(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
@@ -212,6 +219,13 @@ public partial class MainWindow : Window
     {
         _status = status;
         StatusText.Text = status(_t);
+    }
+
+    private void SetRows(Func<Strings, IReadOnlyList<StatusRow>>? rows)
+    {
+        _rows = rows;
+        RoomRows.ItemsSource = rows?.Invoke(_t);
+        RoomRows.Visibility = rows is null ? Visibility.Collapsed : Visibility.Visible;
     }
 
     protected override void OnSourceInitialized(EventArgs e)
@@ -425,7 +439,7 @@ public partial class MainWindow : Window
         // In a room the host's game (chosen here before opening it) and the orchestrator's frame rate apply.
         GameLabel.Visibility = GameBox.Visibility = FpsLabel.Visibility = FpsBox.Visibility = inRoom ? Visibility.Collapsed : Visibility.Visible;
         RefreshButton.IsEnabled = idle;
-        _tray.Text = idle ? "Odx Capture" : _t.TrayTooltip(_trayStartStop.Text);
+        _tray.Text = idle ? Brand.Name : _t.TrayTooltip(_trayStartStop.Text);
     }
 
     private void BeginCountdown()
@@ -839,6 +853,9 @@ public partial class MainWindow : Window
     {
         _room?.Dispose();
         _room = null;
+        _quickItems = null;
+        ShowQuickCheck();
+        SetRows(null);
         if (_run is null) SetState(RunState.Idle, status);
         else StopRecording();
     }
@@ -847,6 +864,7 @@ public partial class MainWindow : Window
     {
         if (_room is not { Agent.Room: { } room } session)
         {
+            SetRows(null);
             SetStatus(t => t.JoiningRoom);
             return;
         }
@@ -861,15 +879,61 @@ public partial class MainWindow : Window
         var clock = session.Agent.Clock;
         bool clockOff = _config.TimeServer is not null && clock is { Ok: false, NtpError: null };
         SyncClockButton.Visibility = clockOff && !_syncingClock ? Visibility.Visible : Visibility.Collapsed;
-        var quick = _quickCheck;
-        SetStatus(t => t.RoomStatus(room.Code, room.Game, host, members) + (round is null ? "" : "\n" + round(t)) +
-                       (quick is null ? "" : "\n" + quick(t)) +
-                       (_config.TimeServer is null ? "" : "\n" + (_syncingClock ? t.ClockSyncing : t.ClockLine(clock))) +
-                       (session.Agent.Capture is { } capture ? "\n" + t.CaptureLine(capture) +
-                                                               (capture.Audio is { } audio ? "\n" + t.AudioLine(audio) : "") : "") +
-                       (lan is null ? "" : "\n" + t.LanStatus(lan)) +
-                       (packets is { } on ? "\n" + (on ? t.PacketsOn : t.PacketsOff) : "") + "\n" + log + "\n" +
+        var capture = session.Agent.Capture;
+        SetRows(t => RoomStatusRows(t, room.Code, room.Game, host, members, clock, capture, lan, packets));
+        SetStatus(t => (round is null ? "" : round(t) + "\n") + log + "\n" +
                        (host ? t.HostHint(hotkey) : ready ? t.ReadyOn(hotkey) : t.ReadyHint(hotkey)));
+    }
+
+    /// <summary>Eskimo: the room's state as marked rows; what each row says is the status line's own text.</summary>
+    private IReadOnlyList<StatusRow> RoomStatusRows(Strings t, string code, string game, bool host, string members,
+        ClockCheck? clock, CaptureProbe? capture, LanState? lan, bool? packets)
+    {
+        var rows = new List<StatusRow>
+        {
+            new(RowLevel.Info, t.RowRoom, t.RoomRow(code, game, host)),
+            new(RowLevel.Info, t.RowPlayers, members),
+        };
+        if (_config.TimeServer is not null)
+            rows.Add(_syncingClock
+                ? new StatusRow(RowLevel.Info, t.RowClock, RowText(t.ClockSyncing))
+                : new StatusRow(ClockLevel(clock), t.RowClock, RowText(t.ClockLine(clock))));
+        if (capture is not null)
+        {
+            rows.Add(new StatusRow(capture.Ok ? RowLevel.Ok : RowLevel.Fail, t.RowCapture, RowText(t.CaptureLine(capture))));
+            if (capture.Audio is { } audio) rows.Add(new StatusRow(AudioLevel(audio), t.RowAudio, RowText(t.AudioLine(audio))));
+        }
+        if (lan is not null)
+        {
+            var level = lan.Status switch { "ok" => RowLevel.Ok, "joining" => RowLevel.Info, _ => RowLevel.Warn };
+            rows.Add(new StatusRow(level, t.RowLan, RowText(t.LanStatus(lan))));
+        }
+        if (packets is { } on)
+            rows.Add(new StatusRow(on ? RowLevel.Ok : RowLevel.Warn, t.RowPackets, RowText(on ? t.PacketsOn : t.PacketsOff)));
+        return rows;
+    }
+
+    /// <summary>Off by more than ClockCheck.MaxOffsetMs fails (Sync clock fixes it); NTP not answering only warns.</summary>
+    private static RowLevel ClockLevel(ClockCheck? clock) => clock switch
+    {
+        null => RowLevel.Info,
+        { Ok: true } => RowLevel.Ok,
+        { NtpError: null } => RowLevel.Fail,
+        _ => RowLevel.Warn,
+    };
+
+    /// <summary>The game's own sound passes; the whole PC's sound or gaps warn; no sound or a silent track fails.</summary>
+    private static RowLevel AudioLevel(AudioStatus audio) =>
+        audio.Source == AudioStatus.NotRecorded || audio.SilentRatio > 0.99 ? RowLevel.Fail
+        : audio.Source != AudioStatus.FromProcess || audio.Discontinuities > 0 ? RowLevel.Warn
+        : RowLevel.Ok;
+
+    /// <summary>A status line ("Clock: … ✓") without its label and check mark, which the row shows itself.</summary>
+    private static string RowText(string line)
+    {
+        int colon = line.IndexOf(": ", StringComparison.Ordinal);
+        string text = colon < 0 ? line : line[(colon + 2)..];
+        return text.EndsWith(" ✓", StringComparison.Ordinal) ? text[..^2] : text;
     }
 
     private bool _syncingClock;

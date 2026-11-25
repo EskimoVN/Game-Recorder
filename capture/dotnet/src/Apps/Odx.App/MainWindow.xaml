@@ -1,14 +1,73 @@
 <Window x:Class="Odx.App.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Odx Capture" Icon="odx.ico" Width="560" SizeToContent="Height" ResizeMode="CanMinimize"
+        xmlns:local="clr-namespace:Odx.App"
+        Title="{x:Static local:Brand.Name}" Icon="odx.ico" Width="560" SizeToContent="Height" ResizeMode="CanMinimize"
         WindowStartupLocation="CenterScreen" Style="{StaticResource DangoWindow}">
     <!-- Texts come from Strings (English / Vietnamese), set in code-behind. -->
+    <Window.Resources>
+        <!-- Eskimo 1.0.0: a StatusRow's mark: green check, amber "!", red cross, or a ring for information. -->
+        <DataTemplate x:Key="RowMark" DataType="{x:Type local:StatusRow}">
+            <Grid Width="16" Height="16">
+                <Ellipse x:Name="Disc" Fill="{StaticResource MatchaBrush}" />
+                <TextBlock x:Name="Glyph" Text="✓" FontSize="10" FontWeight="Bold" HorizontalAlignment="Center"
+                           VerticalAlignment="Center" Foreground="{StaticResource MatchaInkBrush}" />
+            </Grid>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding Level}" Value="Warn">
+                    <Setter TargetName="Disc" Property="Fill" Value="{StaticResource WarnBrush}" />
+                    <Setter TargetName="Glyph" Property="Text" Value="!" />
+                    <Setter TargetName="Glyph" Property="Foreground" Value="{StaticResource WarnInkBrush}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Level}" Value="Fail">
+                    <Setter TargetName="Disc" Property="Fill" Value="{StaticResource RecordBrush}" />
+                    <Setter TargetName="Glyph" Property="Text" Value="✕" />
+                    <Setter TargetName="Glyph" Property="Foreground" Value="{StaticResource FailInkBrush}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Level}" Value="Info">
+                    <Setter TargetName="Disc" Property="Fill" Value="Transparent" />
+                    <Setter TargetName="Disc" Property="Stroke" Value="{StaticResource TextMutedBrush}" />
+                    <Setter TargetName="Disc" Property="StrokeThickness" Value="1.5" />
+                    <Setter TargetName="Disc" Property="Width" Value="8" />
+                    <Setter TargetName="Disc" Property="Height" Value="8" />
+                    <Setter TargetName="Glyph" Property="Text" Value="" />
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+        <!-- Room status: mark, label column, text. -->
+        <DataTemplate x:Key="RoomRowTemplate" DataType="{x:Type local:StatusRow}">
+            <Grid Margin="0,0,0,5">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="16" />
+                    <ColumnDefinition Width="Auto" SharedSizeGroup="RowLabel" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource RowMark}" VerticalAlignment="Top"
+                                  Margin="0,1,0,0" />
+                <TextBlock Grid.Column="1" Text="{Binding Label}" Margin="8,0,12,0" Foreground="{StaticResource TextMutedBrush}" />
+                <TextBlock Grid.Column="2" Text="{Binding Text}" TextWrapping="Wrap" />
+            </Grid>
+        </DataTemplate>
+        <!-- Quick check: only the rows that are not OK, value in Consolas, what to do after it. -->
+        <DataTemplate x:Key="QuickRowTemplate" DataType="{x:Type local:StatusRow}">
+            <DockPanel Margin="3,6,0,0">
+                <ContentPresenter DockPanel.Dock="Left" Content="{Binding}" ContentTemplate="{StaticResource RowMark}"
+                                  VerticalAlignment="Top" Margin="0,1,0,0" />
+                <TextBlock DockPanel.Dock="Left" Text="{Binding Label}" Margin="8,0,8,0" />
+                <TextBlock DockPanel.Dock="Left" Text="{Binding Text}" FontFamily="Consolas" FontWeight="SemiBold" />
+                <TextBlock Text="{Binding Hint}" Margin="10,0,0,0" TextWrapping="Wrap"
+                           Foreground="{StaticResource TextSecondaryBrush}" />
+            </DockPanel>
+        </DataTemplate>
+    </Window.Resources>
     <Grid Background="{StaticResource BackdropBrush}" RenderOptions.BitmapScalingMode="HighQuality">
         <DockPanel>
             <Border DockPanel.Dock="Top" Height="76" Background="{StaticResource HeaderArtBrush}" Padding="18,0">
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                    <TextBlock VerticalAlignment="Center" FontSize="19"><Run Text="Odx" FontFamily="Bahnschrift SemiBold, Segoe UI Semibold" /><Run Text=" Capture" Foreground="{StaticResource TextSecondaryBrush}" /></TextBlock>
+                    <!-- Eskimo 1.0.0: the team's logo; the name's first word bold, the rest dimmer (Brand.Name, set in code). -->
+                    <Image Source="logo.png" Width="44" Height="44" Margin="0,0,12,0" VerticalAlignment="Center"
+                           RenderOptions.BitmapScalingMode="HighQuality" />
+                    <TextBlock VerticalAlignment="Center" FontSize="20"><Run x:Name="BrandFirst" FontFamily="Bahnschrift SemiBold, Segoe UI Semibold" /><Run x:Name="BrandRest" Foreground="{StaticResource TextSecondaryBrush}" /></TextBlock>
                     <!-- The build's version (without the commit), so a screenshot tells which package a player runs. -->
                     <Border CornerRadius="10" Padding="9,2" Margin="12,0,0,0" BorderThickness="1" VerticalAlignment="Center"
                             BorderBrush="{StaticResource HairlineBrush}" Background="#33000000">
@@ -290,8 +349,50 @@
                         </StackPanel>
                         </DockPanel>
 
-                        <TextBlock x:Name="StatusText" AutomationProperties.AutomationId="StatusText" Grid.Row="3"
-                                   Grid.ColumnSpan="2" TextWrapping="Wrap" Margin="0,4,0,8" />
+                        <StackPanel Grid.Row="3" Grid.ColumnSpan="2" Margin="0,4,0,4">
+                            <!-- Eskimo 1.0.0: this machine's quick check of the last round: one "all OK" line, or only the
+                                 rows that failed (red) or warn (amber). Colors follow Tag (the worst RowLevel), set in code. -->
+                            <Border x:Name="QuickPanel" AutomationProperties.AutomationId="QuickPanel" Visibility="Collapsed"
+                                    CornerRadius="10" Padding="12,10" Margin="0,4,0,8" BorderThickness="1">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="Background" Value="{StaticResource OkPanelBrush}" />
+                                        <Setter Property="BorderBrush" Value="{StaticResource OkPanelLineBrush}" />
+                                        <Style.Triggers>
+                                            <Trigger Property="Tag" Value="Warn">
+                                                <Setter Property="Background" Value="{StaticResource WarnPanelBrush}" />
+                                                <Setter Property="BorderBrush" Value="{StaticResource WarnPanelLineBrush}" />
+                                            </Trigger>
+                                            <Trigger Property="Tag" Value="Fail">
+                                                <Setter Property="Background" Value="{StaticResource FailPanelBrush}" />
+                                                <Setter Property="BorderBrush" Value="{StaticResource FailPanelLineBrush}" />
+                                            </Trigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <StackPanel>
+                                    <DockPanel>
+                                        <ContentPresenter x:Name="QuickMark" DockPanel.Dock="Left" VerticalAlignment="Center"
+                                                          ContentTemplate="{StaticResource RowMark}">
+                                            <ContentPresenter.LayoutTransform>
+                                                <ScaleTransform ScaleX="1.375" ScaleY="1.375" />
+                                            </ContentPresenter.LayoutTransform>
+                                        </ContentPresenter>
+                                        <TextBlock x:Name="QuickSourceText" DockPanel.Dock="Right" VerticalAlignment="Center"
+                                                   FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" />
+                                        <TextBlock x:Name="QuickTitleText" AutomationProperties.AutomationId="QuickTitleText"
+                                                   Margin="10,0,10,0" VerticalAlignment="Center" FontSize="16" FontWeight="Bold" />
+                                    </DockPanel>
+                                    <ItemsControl x:Name="QuickRows" Focusable="False" ItemTemplate="{StaticResource QuickRowTemplate}" />
+                                </StackPanel>
+                            </Border>
+                            <!-- Eskimo 1.0.0: the room's state as marked rows (room, players, clock, capture, audio, LAN, packets). -->
+                            <ItemsControl x:Name="RoomRows" Focusable="False" Visibility="Collapsed" Grid.IsSharedSizeScope="True"
+                                          Margin="0,0,0,4" ItemTemplate="{StaticResource RoomRowTemplate}" />
+                            <Border Padding="10,7" CornerRadius="8" Background="{StaticResource SheenBrush}">
+                                <TextBlock x:Name="StatusText" AutomationProperties.AutomationId="StatusText" TextWrapping="Wrap" />
+                            </Border>
+                        </StackPanel>
                     </Grid>
                     </StackPanel>
                 </Border>

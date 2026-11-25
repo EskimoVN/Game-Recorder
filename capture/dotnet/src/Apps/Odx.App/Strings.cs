@@ -101,7 +101,6 @@ public sealed class Strings
     public required Func<string, string, string> RoundCaptureFailed { get; init; }
     public required string PlayerIdentityRequired { get; init; }
     public required string JoiningRoom { get; init; }
-    public required Func<string, string, bool, string, string> RoomStatus { get; init; }
     /// <summary>What a member is doing, after their name: starting, recording, saving; empty when idle.</summary>
     public required Func<string, string> MemberState { get; init; }
     /// <summary>The round's outcome for the whole room: the players to record again (failed) and those to check (degraded), each with their problems.</summary>
@@ -133,6 +132,20 @@ public sealed class Strings
     public required Func<string, string> LiveProblem { get; init; }
     public required Func<int, string> QuickTitle { get; init; }
     public required Func<Odx.Capture.QuickItem, string> QuickLine { get; init; }
+    // Eskimo 1.0.0: the quick-check card (one "all OK" line, or only the rows that are not OK) and the room status rows.
+    public required string QuickAllOk { get; init; }
+    /// <summary>The card's title when something is not OK: (failures, warnings).</summary>
+    public required Func<int, int, string> QuickProblems { get; init; }
+    public required string QuickSource { get; init; }
+    public required Func<Odx.Capture.QuickItem, StatusRow> QuickRow { get; init; }
+    public required Func<string, string, bool, string> RoomRow { get; init; }
+    public required string RowRoom { get; init; }
+    public required string RowPlayers { get; init; }
+    public required string RowClock { get; init; }
+    public required string RowCapture { get; init; }
+    public required string RowAudio { get; init; }
+    public required string RowLan { get; init; }
+    public required string RowPackets { get; init; }
     public required Func<string, string> EndRound { get; init; }
     public required Func<string, string> ReadyButton { get; init; }
     public required Func<string, string> UnreadyButton { get; init; }
@@ -198,7 +211,7 @@ public sealed class Strings
         AudioTooltip = "Also record the game's sound into the video (only the game, no voice chat or other apps, when the window or the game profile names its process; otherwise everything this PC plays)",
         Video = "Video",
         ObsOption = "Record with OBS",
-        ObsTooltip = "OBS records the video with its own scene, output and audio settings (set it to constant frame rate, 1080p, 30 or 60 FPS); Odx Capture starts and stops it. OBS must be open, with Tools > WebSocket Server Settings > Enable WebSocket server",
+        ObsTooltip = $"OBS records the video with its own scene, output and audio settings (set it to constant frame rate, 1080p, 30 or 60 FPS); {Brand.Name} starts and stops it. OBS must be open, with Tools > WebSocket Server Settings > Enable WebSocket server",
         ObsAddressTooltip = "Address of OBS's WebSocket server (Tools > WebSocket Server Settings), usually 127.0.0.1:4455",
         ObsPasswordTooltip = "OBS's WebSocket server password (Tools > WebSocket Server Settings > Show Connect Info); empty if authentication is off",
         ObsTest = "Test",
@@ -261,7 +274,7 @@ public sealed class Strings
         RoundCaptureFailed = (session, dir) => $"✗ Round {session}: capture failed (what was recorded stays in {dir})",
         PlayerIdentityRequired = "Fill in your Player ID (1-32 lowercase letters, digits, - or _) and your Name first.",
         JoiningRoom = "Joining the room…",
-        RoomStatus = (code, game, host, members) => $"Room {code} · {game}{(host ? " · you are the host: share this invite code" : "")}\nPlayers: {members}",
+        RoomRow = (code, game, host) => $"{code} · {game}{(host ? " · you are the host: share this invite code" : "")}",
         MemberState = state => state switch { "starting" => " · starting", "recording" => " · recording", "saving" => " · saving…", _ => "" },
         RoundVerdict = (session, failed, degraded) =>
             failed.Count == 0 && degraded.Count == 0 ? $"✓ Round {session}: all OK" :
@@ -294,6 +307,19 @@ public sealed class Strings
             : p.StartsWith("audio:", StringComparison.Ordinal) ? "No game sound for 15 s: check the game's volume" : p,
         QuickTitle = problems => problems == 0 ? "Quick check: PASS" : $"Quick check: {problems} problem(s)",
         QuickLine = i => QuickLineText(i, false),
+        QuickAllOk = "ALL OK",
+        QuickProblems = (fails, warnings) => string.Join(" · ",
+            new[] { fails > 0 ? $"{fails} failed" : null, warnings > 0 ? $"{warnings} warning{(warnings == 1 ? "" : "s")}" : null }
+                .OfType<string>()),
+        QuickSource = "Quick check · this PC",
+        QuickRow = i => QuickRowFor(i, false),
+        RowRoom = "Room",
+        RowPlayers = "Players",
+        RowClock = "Clock",
+        RowCapture = "Capture",
+        RowAudio = "Audio",
+        RowLan = "LAN",
+        RowPackets = "Packets",
         TaskIdRequired = "Enter the task ID (the round's folder name: letters, digits, _ . -) before starting the round",
         EndRound = hotkey => $"End round ({hotkey})",
         ReadyButton = hotkey => $"I'm ready ({hotkey})",
@@ -304,7 +330,7 @@ public sealed class Strings
         ReadyHint = hotkey => $"Press {hotkey} when you are ready; the round starts when everyone is.",
         ReadyOn = hotkey => $"READY: waiting for the others ({hotkey} to cancel).",
         RoundToggleFailed = error => $"Could not start/end the round: {error}",
-        TrayTooltip = state => $"Odx Capture: {state}",
+        TrayTooltip = state => $"{Brand.Name}: {state}",
         EndOverlay = "END",
         FinalizingOverlay = percent => $"Video {percent} %",
         BuildingOverlay = "Session…",
@@ -373,7 +399,7 @@ public sealed class Strings
         AudioTooltip = "Ghi tiếng game vào video (chỉ tiếng game, không có voice chat hay app khác, khi biết process của game qua cửa sổ hoặc profile game; nếu không thì ghi mọi âm thanh máy này phát ra)",
         Video = "Video",
         ObsOption = "Ghi bằng OBS",
-        ObsTooltip = "OBS ghi video theo scene, output và audio đã chỉnh trong OBS (đặt frame rate cố định, 1080p, 30 hoặc 60 FPS); Odx Capture tự bật và tắt ghi. OBS phải đang mở, có bật Tools > WebSocket Server Settings > Enable WebSocket server",
+        ObsTooltip = $"OBS ghi video theo scene, output và audio đã chỉnh trong OBS (đặt frame rate cố định, 1080p, 30 hoặc 60 FPS); {Brand.Name} tự bật và tắt ghi. OBS phải đang mở, có bật Tools > WebSocket Server Settings > Enable WebSocket server",
         ObsAddressTooltip = "Địa chỉ WebSocket server của OBS (Tools > WebSocket Server Settings), thường là 127.0.0.1:4455",
         ObsPasswordTooltip = "Mật khẩu WebSocket server của OBS (Tools > WebSocket Server Settings > Show Connect Info); để trống nếu tắt xác thực",
         ObsTest = "Kiểm tra",
@@ -436,7 +462,7 @@ public sealed class Strings
         RoundCaptureFailed = (session, dir) => $"✗ Round {session}: ghi lỗi (phần đã ghi vẫn ở {dir})",
         PlayerIdentityRequired = "Hãy điền Mã người chơi (1-32 chữ thường, số, - hoặc _) và Tên trước.",
         JoiningRoom = "Đang vào room…",
-        RoomStatus = (code, game, host, members) => $"Room {code} · {game}{(host ? " · bạn là host: gửi mã mời này cho mọi người" : "")}\nNgười chơi: {members}",
+        RoomRow = (code, game, host) => $"{code} · {game}{(host ? " · bạn là host: gửi mã mời này cho mọi người" : "")}",
         MemberState = state => state switch { "starting" => " · đang khởi động", "recording" => " · đang ghi", "saving" => " · đang lưu…", _ => "" },
         RoundVerdict = (session, failed, degraded) =>
             failed.Count == 0 && degraded.Count == 0 ? $"✓ Round {session}: tất cả OK" :
@@ -469,6 +495,18 @@ public sealed class Strings
             : p.StartsWith("audio:", StringComparison.Ordinal) ? "Không có tiếng game 15 giây. Kiểm tra âm lượng game." : p,
         QuickTitle = problems => problems == 0 ? "Kiểm nhanh: ĐẠT" : $"Kiểm nhanh: {problems} lỗi/cảnh báo",
         QuickLine = i => QuickLineText(i, true),
+        QuickAllOk = "TẤT CẢ OK",
+        QuickProblems = (fails, warnings) => string.Join(" · ",
+            new[] { fails > 0 ? $"{fails} lỗi" : null, warnings > 0 ? $"{warnings} cảnh báo" : null }.OfType<string>()),
+        QuickSource = "Kiểm nhanh · máy này",
+        QuickRow = i => QuickRowFor(i, true),
+        RowRoom = "Room",
+        RowPlayers = "Người chơi",
+        RowClock = "Đồng hồ",
+        RowCapture = "Ghi hình",
+        RowAudio = "Âm thanh",
+        RowLan = "LAN",
+        RowPackets = "Gói mạng",
         TaskIdRequired = "Nhập Task ID (tên thư mục của round: chữ, số, _ . -) rồi mới bắt đầu round",
         EndRound = hotkey => $"Kết thúc round ({hotkey})",
         ReadyButton = hotkey => $"Tôi sẵn sàng ({hotkey})",
@@ -479,7 +517,7 @@ public sealed class Strings
         ReadyHint = hotkey => $"Nhấn {hotkey} khi bạn sẵn sàng; round bắt đầu khi mọi người đều sẵn sàng.",
         ReadyOn = hotkey => $"ĐÃ SẴN SÀNG: đang chờ người khác (nhấn {hotkey} để hủy).",
         RoundToggleFailed = error => $"Không bắt đầu/kết thúc được round: {error}",
-        TrayTooltip = state => $"Odx Capture: {state}",
+        TrayTooltip = state => $"{Brand.Name}: {state}",
         EndOverlay = "KẾT THÚC",
         FinalizingOverlay = percent => $"Video {percent} %",
         BuildingOverlay = "Session…",
@@ -576,6 +614,47 @@ public sealed class Strings
     /// <summary>Beyond this the Windows clock is badly synced; NTP still fixes the session times, but other tools use it.</summary>
     public const double ClockWarningMs = 1000;
 
+    /// <summary>
+    /// Eskimo: each RoundQuickCheck id's label and unit. An id missing here still shows, under its id and raw value, so a
+    /// check added to RoundQuickCheck appears before it gets a label.
+    /// </summary>
+    private static readonly Dictionary<string, (string En, string Vi, string Unit)> QuickLabels = new()
+    {
+        ["fps"] = ("FPS", "FPS", ""),
+        ["size"] = ("Frame", "Khung hình", ""),
+        ["freeze"] = ("Longest freeze", "Đứng hình dài nhất", " ms"),
+        ["audio_track"] = ("Audio tracks", "Track âm thanh", ""),
+        ["silence"] = ("Longest silence", "Im lặng dài nhất", " s"),
+        ["volume"] = ("Mean volume", "Âm lượng TB", " dB"),
+        ["clipping"] = ("Audio peak", "Đỉnh âm thanh", " dB"),
+        ["input_keys"] = ("Keys", "Phím", ""),
+        ["input_mouse"] = ("Mouse", "Chuột", ""),
+        ["files"] = ("Files", "File", ""),
+    };
+
+    private static StatusRow QuickRowFor(Odx.Capture.QuickItem i, bool vi)
+    {
+        var (label, value) = QuickLabelAndValue(i, vi);
+        var level = i.Level switch
+        {
+            Odx.Capture.QuickLevel.Ok => RowLevel.Ok,
+            Odx.Capture.QuickLevel.Warn => RowLevel.Warn,
+            _ => RowLevel.Fail,
+        };
+        string hint = i.Id == "clipping" && level != RowLevel.Ok
+            ? vi ? "vỡ tiếng: giảm âm lượng game" : "clipping: lower the game's volume"
+            : "";
+        return new StatusRow(level, label, value, hint);
+    }
+
+    private static (string Label, string Value) QuickLabelAndValue(Odx.Capture.QuickItem i, bool vi)
+    {
+        if (!QuickLabels.TryGetValue(i.Id, out var known)) return (i.Id, i.Value);
+        // silence is a share of the track ("100%") when the whole track is silent, else seconds
+        string unit = i.Value.EndsWith('%') ? "" : known.Unit;
+        return (vi ? known.Vi : known.En, i.Value + unit);
+    }
+
     private static string QuickLineText(Odx.Capture.QuickItem i, bool vi)
     {
         string mark = i.Level switch
@@ -584,18 +663,7 @@ public sealed class Strings
             Odx.Capture.QuickLevel.Warn => vi ? "CẢNH BÁO" : "WARN",
             _ => vi ? "LỖI" : "FAIL",
         };
-        string text = i.Id switch
-        {
-            "fps" => $"FPS {i.Value}",
-            "size" => (vi ? "Khung hình " : "Frame ") + i.Value,
-            "freeze" => (vi ? "Đứng hình dài nhất " : "Longest freeze ") + i.Value + " ms",
-            "audio_track" => (vi ? "Track âm thanh: " : "Audio tracks: ") + i.Value,
-            "silence" => (vi ? "Im lặng dài nhất " : "Longest silence ") + i.Value + (i.Value.EndsWith('%') ? "" : " s"),
-            "volume" => (vi ? "Âm lượng TB " : "Mean volume ") + i.Value + " dB",
-            "clipping" => (vi ? "Đỉnh âm thanh " : "Audio peak ") + i.Value + " dB" +
-                          (i.Level == Odx.Capture.QuickLevel.Ok ? "" : vi ? " (vỡ tiếng: giảm âm lượng game)" : " (clipping: lower the game's volume)"),
-            _ => $"{i.Id} {i.Value}",
-        };
-        return $"{mark} {text}";
+        var row = QuickRowFor(i, vi);
+        return $"{mark} {row.Label} {row.Text}" + (row.Hint.Length == 0 ? "" : $" ({row.Hint})");
     }
 }

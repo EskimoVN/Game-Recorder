@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Windows;
 using System.Windows.Threading;
 using Odx.Capture;
 using Odx.Core;
@@ -112,7 +113,8 @@ public partial class MainWindow
         }
     }
 
-    private Func<Strings, string>? _quickCheck;
+    /// <summary>This machine's quick check of the last kept round; null before one, while the next records, outside a room.</summary>
+    private IReadOnlyList<QuickItem>? _quickItems;
 
     /// <summary>
     /// Notices over the game while recording only where they cannot get into the video: Windows 11 excludes overlays from
@@ -125,7 +127,8 @@ public partial class MainWindow
     /// <summary>A round's capture started: its live problems (CaptureReport.LiveProblem) show over the game.</summary>
     private void WatchRecording(ICaptureRun run)
     {
-        _quickCheck = null;
+        _quickItems = null;
+        ShowQuickCheck();
         run.ProblemChanged += problem => Dispatcher.BeginInvoke(() =>
         {
             if (problem is not null && _run == run && NoticeSafeWhileRecording())
@@ -149,10 +152,31 @@ public partial class MainWindow
         }
         if (_run is not null || _room != room || room is null) return;  // the next round already records, or the room was left
         int problems = items.Count(i => i.Level != QuickLevel.Ok);
-        _quickCheck = t => t.QuickTitle(problems) + "\n" + string.Join("\n", items.Select(t.QuickLine));
+        _quickItems = items;
+        ShowQuickCheck();
         ToastOverlay.Notify(problems == 0, _t.QuickTitle(problems),
             problems == 0 ? null : string.Join("\n", items.Where(i => i.Level != QuickLevel.Ok).Select(_t.QuickLine)));
-        if (_state == RunState.Agent) ShowAgentStatus();
+    }
+
+    /// <summary>
+    /// Eskimo 1.0.0: the quick-check card: "ALL OK" with a green check when every item passes, else a count of failures and
+    /// warnings and only those rows. Any id RoundQuickCheck returns shows (Strings.QuickRow labels it).
+    /// </summary>
+    private void ShowQuickCheck()
+    {
+        if (_quickItems is not { } items)
+        {
+            QuickPanel.Visibility = Visibility.Collapsed;
+            return;
+        }
+        int fails = items.Count(i => i.Level == QuickLevel.Fail), warnings = items.Count(i => i.Level == QuickLevel.Warn);
+        var level = fails > 0 ? RowLevel.Fail : warnings > 0 ? RowLevel.Warn : RowLevel.Ok;
+        QuickPanel.Tag = level.ToString();
+        QuickMark.Content = new StatusRow(level, "", "");
+        QuickTitleText.Text = level == RowLevel.Ok ? _t.QuickAllOk : _t.QuickProblems(fails, warnings);
+        QuickSourceText.Text = _t.QuickSource;
+        QuickRows.ItemsSource = items.Where(i => i.Level != QuickLevel.Ok).Select(_t.QuickRow).ToList();
+        QuickPanel.Visibility = Visibility.Visible;
     }
 
     private static (int Width, int Height)? ClientSize(string process)
