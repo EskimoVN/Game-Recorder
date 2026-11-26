@@ -34,11 +34,8 @@ public static class Episode
     public const string VideoFile = VideoFinalize.Delivered;
     public const string CameraId = "pov";
 
-    /// <summary>
-    /// Schema versions and enum values the client has not published yet (Data Delivery Format VER-01; capture/README.md,
-    /// decisions pending): placeholders in one place.
-    /// </summary>
-    public const string SchemaVersion = "1.0.0", CameraRole = "player_pov", CalibrationSource = "game_engine";
+    /// <summary>Our values where the format only shows robotics ones (capture/README.md, decided 2026-11-26).</summary>
+    public const string CameraRole = "player_pov", CalibrationSource = "game_engine";
 
     /// <summary>Every encoder here writes H.264 yuv420p, limited range (FfmpegEncoder.ColorArgs, VideoTrim); MP4 boxes do not say.</summary>
     private const string PixFmt = "yuv420p", ColorRange = "tv";
@@ -49,7 +46,7 @@ public static class Episode
          "camera_tangential_p1", "camera_tangential_p2"];
 
     /// <summary>Writes every episode file but the video and the events, and episode.json without sizes and checksums (<see cref="Seal"/>).</summary>
-    public static void Write(string dir, EpisodeSource s)
+    public static void Write(string dir, EpisodeSource s, CaptureConfig config)
     {
         foreach (string sub in new[] { MetadataFile, ActionsFile }) Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(dir, sub))!);
         var frameNs = s.FrameUtcMs.Select(Ns).ToArray();
@@ -66,11 +63,11 @@ public static class Episode
         var timebase = new JsonObject { ["clock"] = "episode", ["column"] = "timestamp_ns" };
         var artifacts = new JsonArray
         {
-            Artifact("frames", "frames", FramesFile, "games.frames", timebase, s.Rows.Count),
-            Artifact("actions", "actions", ActionsFile, "games.actions", timebase),
+            Artifact("frames", "frames", FramesFile, config, timebase, s.Rows.Count),
+            Artifact("actions", "actions", ActionsFile, config, timebase),
         };
-        if (s.Camera is not null) artifacts.Add(Artifact("camera-pose", "camera_pose", CameraPoseFile, "games.camera_pose", timebase));
-        artifacts.Add(Artifact("sensors", "sensors", SensorsFile, "games.sensors", null));
+        if (s.Camera is not null) artifacts.Add(Artifact("camera-pose", "camera_pose", CameraPoseFile, config, timebase));
+        artifacts.Add(Artifact("sensors", "sensors", SensorsFile, config, null));
 
         string path = Path.Combine(dir, FileName);
         // REV-03: a revision's timestamp is allocated once and kept when the folder is built again.
@@ -79,7 +76,7 @@ public static class Episode
             : UtcText.IsoUs(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
         var episode = new JsonObject
         {
-            ["metadata_schema_version"] = SchemaVersion,
+            ["metadata_schema_version"] = config.MetadataSchemaVersion,
             ["item_id"] = s.CaptureId,
             ["revision_at"] = revisionAt,
             ["replaces_item_id"] = null,
@@ -131,14 +128,14 @@ public static class Episode
     /// Fills episode.json's sizes and SHA-256 (PTH-04) and the video's encoding from the file, lists
     /// annotations/events.jsonl once it is there and drops artifacts whose file is gone. Nothing to do without episode.json.
     /// </summary>
-    public static void Seal(string dir)
+    public static void Seal(string dir, CaptureConfig? config = null)
     {
         string path = Path.Combine(dir, FileName);
         if (!File.Exists(path)) return;
         var episode = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
         var artifacts = episode["artifacts"]!.AsArray();
         if (File.Exists(Path.Combine(dir, EventsFile)) && artifacts.All(a => a!["path"]!.GetValue<string>() != EventsFile))
-            artifacts.Add(Artifact("events", "annotations", EventsFile, "games.events", null));
+            artifacts.Add(Artifact("events", "annotations", EventsFile, config ?? CaptureConfig.Load(), null));
         foreach (var gone in artifacts.Where(a => !File.Exists(Path.Combine(dir, a!["path"]!.GetValue<string>()))).ToList())
             artifacts.Remove(gone);
         foreach (var node in artifacts.Append(episode["domain_metadata"]).Concat(episode["cameras"]!.AsArray()))
@@ -177,15 +174,17 @@ public static class Episode
         entry["sha256"] = Convert.ToHexStringLower(SHA256.HashData(stream));
     }
 
-    private static JsonObject Artifact(string id, string role, string path, string schemaId, JsonObject? timebase, int? rowCount = null)
+    private static JsonObject Artifact(string id, string role, string path, CaptureConfig config, JsonObject? timebase,
+        int? rowCount = null)
     {
+        var (schemaId, schemaVersion) = config.ArtifactSchemas[id];
         var artifact = new JsonObject
         {
             ["artifact_id"] = id,
             ["role"] = role,
             ["path"] = path,
             ["schema_id"] = schemaId,
-            ["schema_version"] = SchemaVersion,
+            ["schema_version"] = schemaVersion,
             ["size_bytes"] = null,
             ["sha256"] = null,
         };

@@ -112,7 +112,7 @@ public static class SessionBuilder
             .Select(x => (x.Item1, x.Item2.C2w, x.Item2.Intrinsics)).ToList();
         Episode.Write(captureDir, new EpisodeSource(captureId, sessionId, fps, width, height, rows, frameUtc,
             mapped.Where(e => e.TQpcMs <= times[^1]).Select(e => (clockMap.ToUnixMs(e.TQpcMs), e)).ToList(),
-            cameraStream, cameras?.Model, profile, playerJson));
+            cameraStream, cameras?.Model, profile, playerJson), config);
         return new BuildReport(sessionId, frames.Count, durationMs, unbound, cameras?.Count(c => c is not null) ?? 0, clock, gridOriginOffset);
     }
 
