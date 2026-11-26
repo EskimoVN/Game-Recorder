@@ -21,7 +21,7 @@ public static class PlayerFile
     public const string FileName = "player.json";
     public const string OffsetDefinition = "server_clock - player_clock";
 
-    public static void Write(string captureDir, JsonObject session, double firstFrameUtcMs, PlayerIdentity? player,
+    public static JsonObject Write(string captureDir, JsonObject session, double firstFrameUtcMs, PlayerIdentity? player,
         string vendorName)
     {
         var json = (JsonObject)session.DeepClone();
@@ -61,6 +61,7 @@ public static class PlayerFile
             ["audio"] = session["vendor_audio"]?.DeepClone(),
         };
         File.WriteAllText(Path.Combine(captureDir, FileName), json.ToJsonString(SessionBuilder.Json));
+        return json;
     }
 
     /// <summary>
@@ -83,7 +84,7 @@ public static class PlayerFile
     /// <summary>clock_sync.offset_ms of a round folder's player.json; null without one.</summary>
     public static double? OffsetMs(string captureDir)
     {
-        string path = Path.Combine(captureDir, FileName);
+        string path = CaptureFolder.Find(captureDir, FileName);
         return File.Exists(path) ? JsonNode.Parse(File.ReadAllText(path))?["clock_sync"]?["offset_ms"]?.GetValue<double>() : null;
     }
 

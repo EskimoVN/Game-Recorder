@@ -1,6 +1,6 @@
 // odx build <capture_dir> --profile <game.json> [--vendor <name>] [--camera <dir>]
-// Turns an `odx input` + `odx record` capture folder into a spec v2 session (frames.csv + session.json next to video.mp4),
-// ready for `odx validate`. A folder whose video.mp4 is missing while video_raw.mp4 (and audio.wav) are there, because
+// Turns an `odx input` + `odx record` capture folder into an episode (Episode: episode.json, videos/pov.mp4, frames.parquet,
+// ...) with the spec v2 session (frames.csv, session.json) and the raw logs in raw/, ready for `odx validate`. A folder whose video.mp4 is missing while video_raw.mp4 (and audio.wav) are there, because
 // the recorder was killed or its finalize failed, gets its video.mp4 first (VideoFinalize). --camera: folder with the
 // extractor DLL's camera_samples.csv + extractor.json (default: the capture folder; without them the camera columns are
 // null). Exit code 1 if the folder cannot be built.
@@ -39,11 +39,12 @@ public static class BuildCommand
                 Console.WriteLine(finalize.Ok
                     ? $"finalized video.mp4: {finalize.Frames} frames{(finalize.HasAudio ? " with sound" : "")}, {finalize.ElapsedMs} ms"
                     : $"video.mp4 not finalized: {finalize.Error}");
-                if (!finalize.Ok && !File.Exists(Path.Combine(dir, VideoFinalize.Output))) return 1;
+                if (!finalize.Ok && !File.Exists(CaptureFolder.Video(dir))) return 1;
             }
             var config = CaptureConfig.Load();
             if (vendor is not null) config = config with { VendorName = vendor };
             var report = SessionBuilder.Build(dir, GameProfile.Load(profilePath), config, cameraDir);
+            CaptureFolder.Tidy(dir);
             Console.WriteLine($"built {report.SessionId}: {report.FrameCount} frames, {report.DurationMs / 1000:F1} s, " +
                               $"camera on {report.CameraFrames} frames");
             var c = report.Clock;

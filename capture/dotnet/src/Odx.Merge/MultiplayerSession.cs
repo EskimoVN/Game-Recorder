@@ -241,7 +241,7 @@ public static class MultiplayerSession
             ["stop_reason"] = player.StopReason,
         };
 
-        bool present = File.Exists(Path.Combine(src, "frames.csv")) && File.Exists(CaptureFolder.Raw(src, "video_frames.csv")) &&
+        bool present = File.Exists(CaptureFolder.Find(src, "frames.csv")) && File.Exists(CaptureFolder.Raw(src, "video_frames.csv")) &&
                        File.Exists(CaptureFolder.Find(src, "session.json"));
         checks.Add(new QaCheck("player.missing", "the player's built capture is there", present,
             present ? "frames.csv, video_frames.csv, session.json" : player.Error ?? "no built capture"));
@@ -249,9 +249,10 @@ public static class MultiplayerSession
 
         foreach (string f in CaptureFiles.Where(f => File.Exists(CaptureFolder.Find(src, f))))
             File.Copy(CaptureFolder.Find(src, f), Path.Combine(work, f), true);
-        File.Copy(Path.Combine(src, "frames.csv"), Path.Combine(dst, "frames.csv"), true);
-        foreach (string f in new[] { "video.mp4", SessionBuilder.KeyBindingsFile }.Where(f => File.Exists(Path.Combine(src, f))))
-            File.Copy(Path.Combine(src, f), Path.Combine(dst, f), true);
+        File.Copy(CaptureFolder.Find(src, "frames.csv"), Path.Combine(dst, "frames.csv"), true);
+        if (File.Exists(CaptureFolder.Video(src))) File.Copy(CaptureFolder.Video(src), Path.Combine(dst, "video.mp4"), true);
+        if (File.Exists(CaptureFolder.Find(src, SessionBuilder.KeyBindingsFile)))
+            File.Copy(CaptureFolder.Find(src, SessionBuilder.KeyBindingsFile), Path.Combine(dst, SessionBuilder.KeyBindingsFile), true);
 
         var v2 = SessionValidator.ValidateSession(src).Where(i => i.Severity == Issue.ErrorSeverity).ToList();
         checks.Add(new QaCheck("player.v2", "spec v2 §1.5 vendor checks", v2.Count == 0,
@@ -260,8 +261,8 @@ public static class MultiplayerSession
         string recordingPath = CaptureFolder.Raw(src, "recording.json");
         var recording = File.Exists(recordingPath) ? JsonNode.Parse(File.ReadAllText(recordingPath))!.AsObject() : null;
         AddRecordingInfo(info, capture, recording, profile);
-        if (recording?["audio"]?["status"] is JsonObject audio) AddAudioCheck(checks, Path.Combine(src, "video.mp4"), audio);
-        var (_, rows) = Csv.ReadFile(Path.Combine(src, "frames.csv"));
+        if (recording?["audio"]?["status"] is JsonObject audio) AddAudioCheck(checks, CaptureFolder.Video(src), audio);
+        var (_, rows) = Csv.ReadFile(CaptureFolder.Find(src, "frames.csv"));
         AddFloorChecks(checks, capture, recording, rows, info, tol, player.StopReason == "permanent_death");
 
         var frameUtc = PutFramesOnServerTime(round, src, info, checks, tol);

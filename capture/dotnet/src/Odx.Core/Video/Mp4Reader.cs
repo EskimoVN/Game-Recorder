@@ -5,7 +5,11 @@ namespace Odx.Core;
 /// <param name="Frames">Samples (= frames for H.264 without B-frame reordering) in the first video track.</param>
 /// <param name="DurationSeconds">Movie duration from mvhd.</param>
 /// <param name="HasAudio">The file has a sound track (hdlr "soun").</param>
-public sealed record Mp4Info(int Width, int Height, long Frames, double DurationSeconds, bool HasAudio = false);
+/// <param name="Codec">The video sample entry's fourcc ("avc1" for H.264).</param>
+/// <param name="VideoBytes">Sum of the video samples' sizes (stsz).</param>
+/// <param name="KeyFrames">Sync samples (stss); every sample when the track has no stss.</param>
+public sealed record Mp4Info(int Width, int Height, long Frames, double DurationSeconds, bool HasAudio = false, string Codec = "",
+    long VideoBytes = 0, long KeyFrames = 0);
 
 /// <summary>
 /// Reads what the validator needs from an MP4 (ISO BMFF) file without ffprobe: walks the box tree to the movie header and
@@ -62,9 +66,23 @@ public static class Mp4Reader
             // stsz: version/flags(4) sample_size(4) sample_count(4).
             if (stsz.Value.Length < 12) throw new InvalidDataException("short stsz box");
             long frames = BinaryPrimitives.ReadUInt32BigEndian(stsz.Value.Span[8..]);
-            video = new Mp4Info(width, height, frames, duration);
+            var stss = Child(stbl!.Value, "stss");
+            long keyFrames = stss is { Length: >= 8 } s ? BinaryPrimitives.ReadUInt32BigEndian(s.Span[4..]) : frames;
+            video = new Mp4Info(width, height, frames, duration, Codec: Type(entry[4..8]), VideoBytes: SampleBytes(stsz.Value.Span, frames),
+                KeyFrames: keyFrames);
         }
         return video is null ? throw new InvalidDataException("no video track") : video with { HasAudio = hasAudio };
+    }
+
+    /// <summary>stsz: one sample_size for all, or 0 and then one 4-byte size per sample.</summary>
+    private static long SampleBytes(ReadOnlySpan<byte> stsz, long count)
+    {
+        long size = BinaryPrimitives.ReadUInt32BigEndian(stsz[4..]);
+        if (size != 0) return size * count;
+        if (stsz.Length < 12 + 4 * count) throw new InvalidDataException("short stsz box");
+        long sum = 0;
+        for (int i = 0; i < count; i++) sum += BinaryPrimitives.ReadUInt32BigEndian(stsz[(12 + 4 * i)..]);
+        return sum;
     }
 
     private static (string Type, int HeaderSize, long Size) ReadHeader(Stream s, long remaining)

@@ -99,6 +99,12 @@ public class Mp4ReaderTests
             $"{name}: {info.Frames} frames vs ffprobe {stream["nb_read_packets"]}");
         double ffDuration = double.Parse(probe["format"]!["duration"]!.GetValue<string>(), CultureInfo.InvariantCulture);
         Assert.True(Math.Abs(ffDuration - info.DurationSeconds) < 0.001, $"{name}: {info.DurationSeconds} s vs ffprobe {ffDuration} s");
+        var packets = JsonNode.Parse(Run("ffprobe", $"-v error -select_streams v:0 -show_entries packet=size,flags:stream=codec_name -of json \"{path}\""))!;
+        var sizes = packets["packets"]!.AsArray().Select(p => long.Parse(p!["size"]!.GetValue<string>(), CultureInfo.InvariantCulture));
+        Assert.True(sizes.Sum() == info.VideoBytes, $"{name}: {info.VideoBytes} video bytes vs ffprobe {sizes.Sum()}");
+        long keys = packets["packets"]!.AsArray().Count(p => p!["flags"]!.GetValue<string>().StartsWith('K'));
+        Assert.True(keys == info.KeyFrames, $"{name}: {info.KeyFrames} key frames vs ffprobe {keys}");
+        if ((string?)packets["streams"]![0]!["codec_name"] == "h264") Assert.Contains(info.Codec, new[] { "avc1", "avc3" });
     }
 
     private static string Run(string exe, string args)

@@ -177,6 +177,22 @@ public class CaptureConfigTests
     }
 
     [Fact]
+    public void Reads_the_episode_schema_ids_over_the_defaults()
+    {
+        var c = CaptureConfig.Load(Dir("""
+            {"metadata_schema_version": "2.1.0",
+             "artifact_schemas": {"frames": {"schema_id": "x.frames", "schema_version": "3.0"}, "events": {"schema_version": "1.1"}}}
+            """));
+        Assert.Equal("2.1.0", c.MetadataSchemaVersion);
+        Assert.Equal(("x.frames", "3.0"), c.ArtifactSchemas["frames"]);
+        Assert.Equal(("games.events", "1.1"), c.ArtifactSchemas["events"]);
+        Assert.Equal(("games.actions", "1.0.0"), c.ArtifactSchemas["actions"]);
+        var d = CaptureConfig.Load(Dir(null));
+        Assert.Equal(("1.0.0", ("games.camera_pose", "1.0.0")), (d.MetadataSchemaVersion, d.ArtifactSchemas["camera-pose"]));
+        Assert.Throws<InvalidDataException>(() => CaptureConfig.Load(Dir("""{"artifact_schemas": {"video": {"schema_version": "1"}}}""")));
+    }
+
+    [Fact]
     public void Invalid_file_is_reported() =>
         Assert.Throws<InvalidDataException>(() => CaptureConfig.Load(Dir("{ time_server")));
 }

@@ -17,6 +17,8 @@ namespace Odx.Core;
 public static class VideoFinalize
 {
     public const string RawVideo = "video_raw.mp4", AudioFile = "audio.wav", Output = "video.mp4";
+    /// <summary>Where a tidied capture folder keeps <see cref="Output"/>: the episode's camera (Data Delivery Format §1).</summary>
+    public const string Delivered = "videos/pov.mp4";
 
     /// <param name="Frames">Video samples in the output (0 when ffmpeg failed).</param>
     /// <param name="Error">Null when the output has the expected frames (and a sound track when a WAV was given).</param>
@@ -111,7 +113,7 @@ public static class VideoFinalize
     {
         string output = Path.Combine(captureDir, Output);
         string? rawVideo = Find(captureDir, RawVideo);
-        if (File.Exists(output) || rawVideo is null) return null;
+        if (File.Exists(output) || File.Exists(Path.Combine(captureDir, Delivered)) || rawVideo is null) return null;
         string framesCsv = Find(captureDir, "video_frames.csv") ?? "";
         long rows = File.Exists(framesCsv) ? CompleteRows(framesCsv) : 0;
         string? recordingPath = Find(captureDir, "recording.json");
