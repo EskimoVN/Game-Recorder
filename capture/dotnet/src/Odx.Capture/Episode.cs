@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text.Json.Nodes;
 using Odx.Core;
+using Odx.Protocol;
 using Parquet;
 using Parquet.Schema;
 
@@ -136,6 +137,8 @@ public static class Episode
         var artifacts = episode["artifacts"]!.AsArray();
         if (File.Exists(Path.Combine(dir, EventsFile)) && artifacts.All(a => a!["path"]!.GetValue<string>() != EventsFile))
             artifacts.Add(Artifact("events", "annotations", EventsFile, config ?? CaptureConfig.Load(), null));
+        string round = CaptureFolder.Raw(dir, RoundRecord.FileName);
+        if (File.Exists(round)) AddRoundPlayers(Path.Combine(dir, MetadataFile), RoundRecord.Load(Path.GetDirectoryName(round)!));
         foreach (var gone in artifacts.Where(a => !File.Exists(Path.Combine(dir, a!["path"]!.GetValue<string>()))).ToList())
             artifacts.Remove(gone);
         foreach (var node in artifacts.Append(episode["domain_metadata"]).Concat(episode["cameras"]!.AsArray()))
@@ -235,6 +238,22 @@ public static class Episode
                 ["recording"] = s.Player["recording"]?.DeepClone(),
             },
         };
+    }
+
+    /// <summary>
+    /// VTM-04: every player of the round (round.json) in participants, this episode's own first; the others have their own
+    /// episodes in the same session_id, so their camera_id is null here.
+    /// </summary>
+    private static void AddRoundPlayers(string metadataPath, RoundRecord round)
+    {
+        if (!File.Exists(metadataPath)) return;
+        var metadata = JsonNode.Parse(File.ReadAllText(metadataPath))!.AsObject();
+        var participants = metadata["participants"]!.AsArray();
+        var own = participants.Where(p => (string?)p!["camera_id"] == CameraId).Select(p => p!.DeepClone()).ToList();
+        var ownIds = own.Select(p => (string?)p["player_id"]).ToHashSet();
+        metadata["participants"] = new JsonArray([.. own, .. round.Players.Where(p => !ownIds.Contains(p.PlayerId))
+            .Select(p => new JsonObject { ["player_id"] = p.PlayerId, ["name"] = p.Name, ["camera_id"] = null })]);
+        WriteJson(metadataPath, metadata);
     }
 
     /// <summary>FRM-05: one record per sensor; the game camera's intrinsics and pose change every frame, so they point at the columns.</summary>

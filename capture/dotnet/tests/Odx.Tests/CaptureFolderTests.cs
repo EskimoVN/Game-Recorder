@@ -121,6 +121,16 @@ public class CaptureFolderTests
             var events = JsonNode.Parse(File.ReadAllText(Path.Combine(dir, Episode.FileName)))!["artifacts"]!.AsArray()
                 .Single(a => (string?)a!["path"] == Episode.EventsFile)!;
             Assert.Equal(3, events["size_bytes"]!.GetValue<long>());
+
+            new Odx.Protocol.RoundRecord("r01", "m1", "Arma 3", null, 1, 0, null, 12300,
+                [new("p2", "Bob"), new("p1", "Alice")]).Save(CaptureFolder.RawFolder(dir));
+            Episode.Seal(dir);
+            Episode.Seal(dir);  // again: still each player once
+            games = JsonNode.Parse(File.ReadAllText(Path.Combine(dir, Episode.MetadataFile)))!;
+            Assert.Equal(["p1", "p2"], games["participants"]!.AsArray().Select(p => (string?)p!["player_id"]));
+            Assert.Null(games["participants"]![1]!["camera_id"]);
+            var metadata = JsonNode.Parse(File.ReadAllText(Path.Combine(dir, Episode.FileName)))!["domain_metadata"]!;
+            Assert.Equal(new FileInfo(Path.Combine(dir, Episode.MetadataFile)).Length, metadata["size_bytes"]!.GetValue<long>());
         }
         finally
         {
