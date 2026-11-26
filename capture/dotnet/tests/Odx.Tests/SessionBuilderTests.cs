@@ -12,6 +12,22 @@ public class SessionBuilderTests
     private static InputEvent Ev(double t, InputKind kind, string value = "", double dx = 0) => new(t, kind, value, dx, 0);
 
     [Fact]
+    public void Actions_start_at_the_first_frame_with_the_presses_still_held_then()
+    {
+        var mapped = new List<InputEvent>
+        {
+            Ev(100, InputKind.KeyDown, "Q"), Ev(150, InputKind.KeyUp, "Q"),  // pressed and released in the countdown: dropped
+            Ev(200, InputKind.KeyDown, "W"), Ev(200, InputKind.ActionStart, "Forward"),  // still held at 1000
+            Ev(300, InputKind.MouseMove, dx: 5),
+            Ev(1200, InputKind.KeyUp, "W"), Ev(1200, InputKind.ActionEnd, "Forward"),
+            Ev(2500, InputKind.ButtonDown, "Left"),  // after the last frame
+        };
+        var actions = SessionBuilder.ActionsWithin(mapped, 1000, 2000);
+        Assert.Equal([Ev(1000, InputKind.KeyDown, "W"), Ev(1000, InputKind.ActionStart, "Forward"),
+            Ev(1200, InputKind.KeyUp, "W"), Ev(1200, InputKind.ActionEnd, "Forward")], actions);
+    }
+
+    [Fact]
     public void Bound_inputs_get_actions_and_unbound_keys_are_dropped()
     {
         var (events, unbound) = SessionBuilder.MapInputs(
@@ -119,10 +135,12 @@ public class SessionBuilderTests
 
             var report = SessionBuilder.Build(dir, GameProfile.Load(WriteProfile(dir)));
 
-            Assert.Equal(new ClockSync("sntp", "ntp.test", 2, 25, 44_000), report.Clock);
+            Assert.Equal(new ClockSync("sntp", "ntp.test", 2, 25, 44_000, 12.5), report.Clock);
             var session = JsonNode.Parse(File.ReadAllText(Path.Combine(dir, "session.json")))!;
             Assert.Equal("2026-10-04T10:00:44.000Z", session["created_at_utc"]!.GetValue<string>());
             Assert.Equal("sntp", session["vendor_clock_sync"]!["source"]!.GetValue<string>());
+            var clock = JsonNode.Parse(File.ReadAllText(Path.Combine(dir, Episode.FileName)))!["clock"]!;
+            Assert.InRange((long)clock["sync_accuracy_ns"]!, 12_500_000, 12_500_000 + 1_000_000_000 / 60);
             var player = JsonNode.Parse(File.ReadAllText(Path.Combine(dir, PlayerFile.FileName)))!;
             Assert.Equal(44_000, (double)player["clock_sync"]!["offset_ms"]!);
             Assert.Equal(PlayerFile.OffsetDefinition, (string?)player["clock_sync"]!["offset_definition"]);
