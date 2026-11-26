@@ -26,10 +26,12 @@ public static partial class RoundQuickCheck
     public const double LongSilenceSeconds = 10;
 
     /// <summary>
-    /// The delivered files (CaptureFolder.Delivered) but events.jsonl: the agent writes it once the whole room is done
-    /// (AgentClient.KeepRoundFiles), which may be after or while this check runs.
+    /// The episode's files (Episode, laid out by CaptureFolder.Tidy) but annotations/events.jsonl, which the agent writes once
+    /// the whole room is done (AgentClient.KeepRoundFiles), and streams/camera_pose.parquet, which only a camera log gives
+    /// (its coverage is the company's QC).
     /// </summary>
-    public static readonly IReadOnlyList<string> RequiredFiles = [.. CaptureFolder.Delivered.Where(n => n != "events.jsonl")];
+    public static readonly IReadOnlyList<string> RequiredFiles =
+        [.. CaptureFolder.Delivered, Episode.VideoFile, Episode.ActionsFile, Episode.MetadataFile];
 
     /// <summary>A failed capture builds no session, so only its video is checked: input and files would only repeat the failure.</summary>
     public static IReadOnlyList<QuickItem> Run(RunResult result, string ffmpeg) => result.CaptureOk
@@ -53,10 +55,10 @@ public static partial class RoundQuickCheck
         yield return Count("input_mouse", mouse);
     }
 
-    /// <summary>Input of the round's frames.csv; a missing or unreadable one counts as no input.</summary>
+    /// <summary>Input of the round's frames.csv (in raw/ once tidied); a missing or unreadable one counts as no input.</summary>
     public static IEnumerable<QuickItem> Input(string sessionDir)
     {
-        string path = Path.Combine(sessionDir, "frames.csv");
+        string path = CaptureFolder.Find(sessionDir, "frames.csv");
         List<Dictionary<string, string>> rows = [];
         if (File.Exists(path))
         {
@@ -83,8 +85,8 @@ public static partial class RoundQuickCheck
     private static List<QuickItem> Recording(RunResult result, string ffmpeg)
     {
         var items = new List<QuickItem>();
-        string video = Path.Combine(result.SessionDir, VideoFinalize.Output);
-        if (!File.Exists(video)) return [new QuickItem("size", QuickLevel.Fail, "no video.mp4")];
+        string video = CaptureFolder.Video(result.SessionDir);
+        if (!File.Exists(video)) return [new QuickItem("size", QuickLevel.Fail, "no " + Episode.VideoFile)];
         Mp4Info info;
         try
         {

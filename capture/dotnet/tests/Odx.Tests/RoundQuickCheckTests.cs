@@ -130,7 +130,7 @@ public class RoundQuickCheckTests
         string dir = Directory.CreateTempSubdirectory("odx-quick-").FullName;
         try
         {
-            foreach (string name in RoundQuickCheck.RequiredFiles) File.WriteAllText(Path.Combine(dir, name), "x");
+            WriteRequired(dir);
             Assert.Equal(new QuickItem("files", QuickLevel.Ok, "ok"), RoundQuickCheck.Files(dir));
         }
         finally
@@ -145,10 +145,10 @@ public class RoundQuickCheckTests
         string dir = Directory.CreateTempSubdirectory("odx-quick-").FullName;
         try
         {
-            foreach (string name in RoundQuickCheck.RequiredFiles) File.WriteAllText(Path.Combine(dir, name), "x");
-            File.Delete(Path.Combine(dir, "key_bindings.json"));
-            File.WriteAllText(Path.Combine(dir, "frames.csv"), "");
-            Assert.Equal(new QuickItem("files", QuickLevel.Fail, "frames.csv, key_bindings.json"), RoundQuickCheck.Files(dir));
+            WriteRequired(dir);
+            File.Delete(Path.Combine(dir, Episode.MetadataFile));
+            File.WriteAllText(Path.Combine(dir, Episode.FramesFile), "");
+            Assert.Equal(new QuickItem("files", QuickLevel.Fail, "frames.parquet, metadata/games.json"), RoundQuickCheck.Files(dir));
         }
         finally
         {
@@ -163,7 +163,7 @@ public class RoundQuickCheckTests
         try
         {
             var failed = new RunResult(dir, false, null, 0, [], null, "recorder exited");
-            Assert.Equal(new[] { new QuickItem("size", QuickLevel.Fail, "no video.mp4") }, RoundQuickCheck.Run(failed, "ffmpeg"));
+            Assert.Equal(new[] { new QuickItem("size", QuickLevel.Fail, "no videos/pov.mp4") }, RoundQuickCheck.Run(failed, "ffmpeg"));
             var kept = RoundQuickCheck.Run(failed with { CaptureOk = true }, "ffmpeg");
             Assert.Equal(new[] { "size", "input_keys", "input_mouse", "files" }, kept.Select(i => i.Id));
         }
@@ -174,12 +174,39 @@ public class RoundQuickCheckTests
     }
 
     [Fact]
-    public void Required_files_are_the_delivered_ones_but_the_room_events()
+    public void Required_files_are_the_episode_ones_but_the_room_events_and_the_camera_pose()
     {
-        Assert.Equal(CaptureFolder.Delivered.Where(n => n != "events.jsonl"), RoundQuickCheck.RequiredFiles);
-        Assert.Contains("video.mp4", RoundQuickCheck.RequiredFiles);
-        Assert.Contains("frames.csv", RoundQuickCheck.RequiredFiles);
-        Assert.Contains("session.json", RoundQuickCheck.RequiredFiles);
-        Assert.Contains("key_bindings.json", RoundQuickCheck.RequiredFiles);
+        Assert.Equal(new[] { "episode.json", "frames.parquet", "sensors.json", "videos/pov.mp4", "streams/actions.parquet", "metadata/games.json" },
+            RoundQuickCheck.RequiredFiles);
+        Assert.Superset(CaptureFolder.Delivered.ToHashSet(), RoundQuickCheck.RequiredFiles.ToHashSet());
+        Assert.DoesNotContain(Episode.EventsFile, RoundQuickCheck.RequiredFiles);
+    }
+
+    [Fact]
+    public void Input_is_read_from_raw_once_the_folder_is_tidied()
+    {
+        string dir = Directory.CreateTempSubdirectory("odx-quick-").FullName;
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(dir, CaptureFolder.RawDir));
+            File.WriteAllText(Path.Combine(dir, CaptureFolder.RawDir, "frames.csv"),
+                "frame_id,timestamp_ms,input_keys,input_actions,input_mouse_buttons,input_mouse_dx,input_mouse_dy\n" +
+                "0,0,w,forward,null,0.0,0.0\n1,33,null,null,null,4.0,0.0\n");
+            Assert.All(RoundQuickCheck.Input(dir), i => Assert.Equal(new QuickItem(i.Id, QuickLevel.Ok, "1"), i));
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    private static void WriteRequired(string dir)
+    {
+        foreach (string name in RoundQuickCheck.RequiredFiles)
+        {
+            string path = Path.Combine(dir, name);
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, "x");
+        }
     }
 }
