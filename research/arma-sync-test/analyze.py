@@ -134,7 +134,7 @@ def analyse(d, window_s):
 
     win = max(1, round(window_s * fps))
     windows = []
-    for w0 in range(0, n - win + 1, win):
+    for w0 in range(0, max(1, n - win + 1), win):  # at least one window; a round shorter than win is one short window
         lag, r = peak(cam[w0:w0 + win], diff[w0:w0 + win])
         mlag, _ = peak(mouse[w0:w0 + win], dyaw[w0:w0 + win])
         v = None
