@@ -1,0 +1,180 @@
+version=12;
+class Mission
+{
+	addOns[]={"A3_Characters_F"};
+	addOnsAuto[]={"A3_Characters_F"};
+	randomSeed=1;
+	class Intel
+	{
+		startWeather=0;
+		forecastWeather=0;
+		year=2035;
+		month=7;
+		day=6;
+		hour=12;
+		minute=0;
+	};
+	class Groups
+	{
+		items=1;
+		class Item0
+		{
+			side="WEST";
+			class Vehicles
+			{
+				items=16;
+				class Item0
+				{
+					position[]={3700,0,13100};
+					id=0;
+					side="WEST";
+					vehicle="B_Soldier_F";
+					player="PLAY CDG";
+					leader=1;
+					skill=0.6;
+				};
+				class Item1
+				{
+					position[]={3704,0,13100};
+					id=1;
+					side="WEST";
+					vehicle="B_Soldier_F";
+					player="PLAY CDG";
+					skill=0.6;
+				};
+				class Item2
+				{
+					position[]={3708,0,13100};
+					id=2;
+					side="WEST";
+					vehicle="B_Soldier_F";
+					player="PLAY CDG";
+					skill=0.6;
+				};
+				class Item3
+				{
+					position[]={3712,0,13100};
+					id=3;
+					side="WEST";
+					vehicle="B_Soldier_F";
+					player="PLAY CDG";
+					skill=0.6;
+				};
+				class Item4
+				{
+					position[]={3716,0,13100};
+					id=4;
+					side="WEST";
+					vehicle="B_Soldier_F";
+					player="PLAY CDG";
+					skill=0.6;
+				};
+				class Item5
+				{
+					position[]={3720,0,13100};
+					id=5;
+					side="WEST";
+					vehicle="B_Soldier_F";
+					player="PLAY CDG";
+					skill=0.6;
+				};
+				class Item6
+				{
+					position[]={3724,0,13100};
+					id=6;
+					side="WEST";
+					vehicle="B_Soldier_F";
+					player="PLAY CDG";
+					skill=0.6;
+				};
+				class Item7
+				{
+					position[]={3728,0,13100};
+					id=7;
+					side="WEST";
+					vehicle="B_Soldier_F";
+					player="PLAY CDG";
+					skill=0.6;
+				};
+				class Item8
+				{
+					position[]={3732,0,13100};
+					id=8;
+					side="WEST";
+					vehicle="B_Soldier_F";
+					player="PLAY CDG";
+					skill=0.6;
+				};
+				class Item9
+				{
+					position[]={3736,0,13100};
+					id=9;
+					side="WEST";
+					vehicle="B_Soldier_F";
+					player="PLAY CDG";
+					skill=0.6;
+				};
+				class Item10
+				{
+					position[]={3740,0,13100};
+					id=10;
+					side="WEST";
+					vehicle="B_Soldier_F";
+					player="PLAY CDG";
+					skill=0.6;
+				};
+				class Item11
+				{
+					position[]={3744,0,13100};
+					id=11;
+					side="WEST";
+					vehicle="B_Soldier_F";
+					player="PLAY CDG";
+					skill=0.6;
+				};
+				class Item12
+				{
+					position[]={3748,0,13100};
+					id=12;
+					side="WEST";
+					vehicle="B_Soldier_F";
+					player="PLAY CDG";
+					skill=0.6;
+				};
+				class Item13
+				{
+					position[]={3752,0,13100};
+					id=13;
+					side="WEST";
+					vehicle="B_Soldier_F";
+					player="PLAY CDG";
+					skill=0.6;
+				};
+				class Item14
+				{
+					position[]={3756,0,13100};
+					id=14;
+					side="WEST";
+					vehicle="B_Soldier_F";
+					player="PLAY CDG";
+					skill=0.6;
+				};
+				class Item15
+				{
+					position[]={3760,0,13100};
+					id=15;
+					side="WEST";
+					vehicle="B_Soldier_F";
+					player="PLAY CDG";
+					skill=0.6;
+				};
+			};
+		};
+	};
+};
+class Intro
+{
+	addOns[]={};
+	addOnsAuto[]={};
+	randomSeed=1;
+};
