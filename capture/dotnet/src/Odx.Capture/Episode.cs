@@ -11,10 +11,11 @@ namespace Odx.Capture;
 /// <param name="Inputs">The bound inputs and actions (<see cref="SessionBuilder.MapInputs"/>) with their Unix ms.</param>
 /// <param name="Camera">The camera at its own rate (Unix ms, canonical C2W, intrinsics); null without camera samples.</param>
 /// <param name="Player">player.json as <see cref="PlayerFile.Write"/> built it.</param>
+/// <param name="SyncAccuracyMs">clock.sync_accuracy_ns in ms (TIM-05); null when not measured.</param>
 public sealed record EpisodeSource(string CaptureId, string SessionId, double Fps, int Width, int Height,
     IReadOnlyList<FrameRow> Rows, IReadOnlyList<double> FrameUtcMs, IReadOnlyList<(double UtcMs, InputEvent Event)> Inputs,
     IReadOnlyList<(double UtcMs, double[,] C2w, Intrinsics Intrinsics)>? Camera, string? CameraModel, GameProfile Profile,
-    JsonObject Player);
+    JsonObject Player, double? SyncAccuracyMs);
 
 /// <summary>
 /// A player's round folder as one episode of the client's Data Delivery Format (§1, §4–§6, §8 games): episode.json,
@@ -33,6 +34,7 @@ public static class Episode
     public const string EventsFile = "annotations/events.jsonl";
     public const string VideoFile = VideoFinalize.Delivered;
     public const string CameraId = "pov";
+    private const string WorldConvention = "world RFU right-handed: X right/east, Y forward/north, Z up";
 
     /// <summary>Our values where the format only shows robotics ones (capture/README.md, decided 2026-11-26).</summary>
     public const string CameraRole = "player_pov", CalibrationSource = "game_engine";
@@ -91,9 +93,7 @@ public static class Episode
                 ["unit"] = "ns",
                 ["capture_start_ns"] = startNs,
                 ["capture_end_ns"] = startNs + (long)Math.Round(durationS * 1e9),
-                // TIM-05 wants a measured figure; how to combine the clock fit, the grid phase and the camera log's own
-                // clock is still open (capture/README.md, decisions pending).
-                ["sync_accuracy_ns"] = null,
+                ["sync_accuracy_ns"] = s.SyncAccuracyMs is double ms ? (long)Math.Round(ms * 1e6) : null,
             },
             ["domain_metadata"] = new JsonObject { ["path"] = MetadataFile, ["size_bytes"] = null, ["sha256"] = null },
             ["cameras"] = new JsonArray(new JsonObject
@@ -211,7 +211,13 @@ public static class Episode
             ["platform"] = s.Profile.Platform,
             ["engine"] = p["engine"]?.DeepClone(),
             ["localization"] = s.Profile.Localization,
-            ["coordinate_system"] = p["coordinate_system"]?.DeepClone(),
+            // The poses are delivered in the canonical world, not the engine's axes (kept as game_axes).
+            ["coordinate_system"] = new JsonObject
+            {
+                ["axes"] = WorldConvention,
+                ["units"] = "meter",
+                ["game_axes"] = p["coordinate_system"]?["axes"]?.DeepClone(),
+            },
             ["participants"] = new JsonArray(participant),
             ["input_mappings"] = new JsonObject
             {
@@ -260,8 +266,7 @@ public static class Episode
                         ["parent_frame"] = "world",
                         ["child_frame"] = "camera",
                         ["direction"] = "camera_to_world",
-                        // Geometry: world RFU (X right/east, Y forward/north, Z up), camera columns Right | Up | Backward.
-                        ["convention"] = "world RFU right-handed; C2W columns right, up, backward, translation (spec v2 §1.1.2.4)",
+                        ["convention"] = $"{WorldConvention}; C2W columns right, up, backward, translation (spec v2 §1.1.2.4)",
                         ["per_frame"] = true,
                         ["artifact_id"] = "frames",
                         ["columns"] = new JsonArray(Frames.C2wColumns.Select(c => (JsonNode)c).ToArray()),

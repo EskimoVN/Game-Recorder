@@ -17,7 +17,10 @@ public sealed record BuildReport(string SessionId, int FrameCount, double Durati
 /// orchestrator's time service in a room), "system" (Windows clock, clock_samples.csv) or "recording" (recording.json).</param>
 /// <param name="RttMs">Median round trip of the NTP samples used.</param>
 /// <param name="SystemOffsetMs">Median of how far the Windows clock was behind the NTP server (negative: ahead).</param>
-public sealed record ClockSync(string Source, string? Server, int Samples, double? RttMs, double? SystemOffsetMs);
+/// <param name="UtcErrorMs">Bound on the QPC → UTC map's error: half the median round trip (path asymmetry) plus the largest
+/// residual of the samples used; null without NTP (the Windows clock's own error is not measured).</param>
+public sealed record ClockSync(string Source, string? Server, int Samples, double? RttMs, double? SystemOffsetMs,
+    double? UtcErrorMs = null);
 
 /// <summary>
 /// Turns a capture folder (odx input + odx record logs) into a spec v2 session: writes frames.csv and session.json next
@@ -106,13 +109,14 @@ public static class SessionBuilder
         ClientFramesBin.Write(Path.Combine(captureDir, ClientFramesBin.FileName), sessionId, rows,
             times.Select(t => t - times[0]).ToList(), frameUtc, config);
         var playerJson = PlayerFile.Write(captureDir, session, startUnixMs, player, config.VendorName);
-        // The camera log runs a little before and after the video; the episode keeps what lies within its frames.
-        var cameraStream = camera?.Samples.Where(x => x.TQpcMs >= times[0] - 1000.0 / fps && x.TQpcMs <= times[^1])
+        // The camera log runs a little before and after the video; the episode keeps what lies within its frames (TIM-01:
+        // nothing before capture_start_ns).
+        var cameraStream = camera?.Samples.Where(x => x.TQpcMs >= times[0] && x.TQpcMs <= times[^1])
             .Select(x => (clockMap.ToUnixMs(x.TQpcMs), camera.Value.Info.ToCanonical(x, width, height)))
             .Select(x => (x.Item1, x.Item2.C2w, x.Item2.Intrinsics)).ToList();
         Episode.Write(captureDir, new EpisodeSource(captureId, sessionId, fps, width, height, rows, frameUtc,
-            mapped.Where(e => e.TQpcMs <= times[^1]).Select(e => (clockMap.ToUnixMs(e.TQpcMs), e)).ToList(),
-            cameraStream, cameras?.Model, profile, playerJson), config);
+            ActionsWithin(mapped, times[0], times[^1]).Select(e => (clockMap.ToUnixMs(e.TQpcMs), e)).ToList(),
+            cameraStream, cameras?.Model, profile, playerJson, SyncAccuracyMs(clock, frames, camera?.Samples)), config);
         return new BuildReport(sessionId, frames.Count, durationMs, unbound, cameras?.Count(c => c is not null) ?? 0, clock, gridOriginOffset);
     }
 
@@ -200,6 +204,23 @@ public static class SessionBuilder
         return (result, unbound);
     }
 
+    /// <summary>
+    /// The actions stream from the first frame to the last (TIM-01): a press still held at the first frame (pressed in the
+    /// countdown) is moved to it so its release still pairs; everything else before it is dropped.
+    /// </summary>
+    public static List<InputEvent> ActionsWithin(IReadOnlyList<InputEvent> mapped, double startMs, double endMs)
+    {
+        var held = new SortedDictionary<(InputKind, string), InputEvent>();
+        var within = new List<InputEvent>();
+        foreach (var e in mapped.Where(e => e.TQpcMs <= endMs))
+        {
+            if (e.TQpcMs >= startMs) within.Add(e);
+            else if (e.Kind is InputKind.KeyDown or InputKind.ButtonDown or InputKind.ActionStart) held[(e.Kind, e.Value)] = e with { TQpcMs = startMs };
+            else if (e.Kind is InputKind.KeyUp or InputKind.ButtonUp or InputKind.ActionEnd) held.Remove((e.Kind - 1, e.Value));
+        }
+        return [.. held.Values, .. within];
+    }
+
     /// <summary>Median of utc_unix_ms − t_qpc_ms over clock_samples.csv; recording.json's start pair if there are none.</summary>
     /// <summary>
     /// QPC → UTC: NTP samples if any (the lower-RTT half, per plan §7.4: the shortest round trips have the least path
@@ -212,9 +233,11 @@ public static class SessionBuilder
         if (ntp.Count > 0)
         {
             var best = ntp.OrderBy(s => s.RttMs).Take((ntp.Count + 1) / 2).OrderBy(s => s.TQpcMs).ToList();
-            var sync = new ClockSync("sntp", string.Join(",", best.Select(s => s.Server).Distinct()), best.Count,
-                Median(best.Select(s => s.RttMs)), Median(ntp.Select(s => s.SystemOffsetMs)));
-            return (ClockMap.Fit(best.Select(s => (s.TQpcMs, s.UtcUnixMs)).ToList()), sync);
+            var map = ClockMap.Fit(best.Select(s => (s.TQpcMs, s.UtcUnixMs)).ToList());
+            double rtt = Median(best.Select(s => s.RttMs));
+            var sync = new ClockSync("sntp", string.Join(",", best.Select(s => s.Server).Distinct()), best.Count, rtt,
+                Median(ntp.Select(s => s.SystemOffsetMs)), rtt / 2 + best.Max(s => Math.Abs(map.ToUnixMs(s.TQpcMs) - s.UtcUnixMs)));
+            return (map, sync);
         }
         string clockPath = CaptureFolder.Raw(captureDir, "clock_samples.csv");
         var system = File.Exists(clockPath)
@@ -224,6 +247,27 @@ public static class SessionBuilder
         var started = DateTimeOffset.Parse(Required<string>(recording, "started_utc"), CultureInfo.InvariantCulture);
         return (ClockMap.Fit([(Required<double>(recording, "started_qpc_ms"), started.ToUnixTimeMilliseconds())]),
             new ClockSync("recording", null, 1, null, null));
+    }
+
+    /// <summary>
+    /// TIM-05 (our reading, capture/README.md): the UTC map's error plus the 95th percentile over frames of how far the
+    /// picture (source time) and the pose (its sample's time) are from the frame's timestamp (grid time). Null when the
+    /// UTC error is not measured.
+    /// </summary>
+    private static double? SyncAccuracyMs(ClockSync clock, List<GridTick> frames, List<CameraSample>? samples)
+    {
+        if (clock.UtcErrorMs is not double utc) return null;
+        var offsets = new List<double>(frames.Count);
+        int j = -1;
+        foreach (var f in frames)
+        {
+            double offset = Math.Abs(f.TGridMs - f.TSourceMs);
+            while (samples is not null && j + 1 < samples.Count && samples[j + 1].TQpcMs <= f.TSourceMs) j++;
+            if (j >= 0 && f.TSourceMs - samples![j].TQpcMs <= MaxCameraAgeMs) offset = Math.Max(offset, Math.Abs(f.TGridMs - samples[j].TQpcMs));
+            offsets.Add(offset);
+        }
+        offsets.Sort();
+        return utc + offsets[(int)Math.Ceiling(0.95 * offsets.Count) - 1];
     }
 
     private static double Median(IEnumerable<double> values)

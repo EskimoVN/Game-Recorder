@@ -108,6 +108,7 @@ public class CaptureFolderTests
 
             var games = JsonNode.Parse(File.ReadAllText(Path.Combine(dir, Episode.MetadataFile)))!;
             Assert.Equal("p1", (string?)games["participants"]![0]!["player_id"]);
+            Assert.StartsWith("world RFU right-handed", (string?)games["coordinate_system"]!["axes"]);
             Assert.Equal(Episode.CameraId, (string?)games["participants"]![0]!["camera_id"]);
             Assert.Equal("Forward", (string?)games["input_mappings"]!["bindings"]!["W"]);
             var sensor = JsonNode.Parse(File.ReadAllText(Path.Combine(dir, Episode.SensorsFile)))!["sensors"]![0]!;
