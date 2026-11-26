@@ -1,4 +1,4 @@
-// Eskimo capture tweaks for the local player: god mode, infinite magazines, double stamina, no HUD. Only on Odx/Eskimo private play
+// Eskimo capture tweaks for the local player: god mode, infinite magazines, double stamina, no HUD, arsenal. Only on Odx/Eskimo private play
 // (single player, this machine hosting, or a server whose name starts with "Eskimo"); never on other servers, the
 // company's Odx servers included: their rules stay as the company set them.
 // The HUD itself is the company addon's (odx_capture ODX_fnc_hideHud, showHUD all off, applied at start and after a
@@ -37,6 +37,27 @@ if (!hasInterface) exitWith {};
     if (!_allowed) exitWith { diag_log format ["ESKIMO,off,server %1", serverName]; };
     diag_log format ["ESKIMO,on,server %1,mission %2", serverName, missionName];
 
+    // Weapons: Home opens the full Virtual Arsenal (every weapon with its optics, muzzles, rail items and bipods). The
+    // action menu is hidden by the company's showHUD, so a key opens it instead of addAction. The loadout picked there is
+    // kept and given back after a respawn, which would otherwise restore the mission's pistol and machine gun.
+    // Home is in no capture binding (capture/profiles/arma3.json): pressed before a round it records nothing.
+    waitUntil { !isNull findDisplay 46 };
+    (findDisplay 46) displayAddEventHandler ["KeyDown", {
+        params ["", "_key", "_shift", "_ctrl", "_alt"];
+        if (_key != 199 || {_shift || _ctrl || _alt} || {!alive player} || {!isNull (uiNamespace getVariable ["RscDisplayArsenal", displayNull])}) exitWith { false };
+        ["Open", true] spawn BIS_fnc_arsenal;
+        true
+    }];
+    [missionNamespace, "arsenalClosed", {
+        missionNamespace setVariable ["eskimo_loadout", getUnitLoadout player];
+        if (!isNil "ODX_fnc_hideHud") then { call ODX_fnc_hideHud; };
+    }] call BIS_fnc_addScriptedEventHandler;
+    player addEventHandler ["Respawn", {
+        params ["_unit"];
+        private _loadout = missionNamespace getVariable ["eskimo_loadout", []];
+        if !(_loadout isEqualTo []) then { _unit setUnitLoadout _loadout; };
+    }];
+
     // Every frame, so nothing a mission shows survives into a recorded frame. Besides the company's showHUD: hints (not
     // covered by it, see odx_capture fn_init.sqf), chat, the cut and title layers missions put their own HUDs, notifications
     // and tips on (Warlords' CP and income), and controls scripts add to the mission display 46.
@@ -67,9 +88,11 @@ if (!hasInterface) exitWith {};
                     _unit addMagazine (if (_new isEqualType []) then { _new select 0 } else { _new });
                 }]];
             };
-            // Backstop when a full inventory refused that magazine: the weapon in hand always keeps one spare.
+            // Backstop when a full inventory refused that magazine: the weapon in hand always keeps one spare. Never while a
+            // reload runs (weaponState's magazineReloadPhase > 0): the reload has already taken the last spare out of the
+            // inventory, and adding a magazine mid-reload cancels it, so the weapon could not fire until reloaded again.
             private _mag = currentMagazine player;
-            if (_mag != "" && {vehicle player == player} && {!(_mag in magazines player)}) then { player addMagazine _mag; };
+            if (_mag != "" && {vehicle player == player} && {((weaponState player) param [6, 0]) == 0} && {!(_mag in magazines player)}) then { player addMagazine _mag; };
             // Double stamina: half of each second's drain is given back (runs last twice as long) and each second's
             // recovery is added again (recovers twice as fast). Measured per unit, so a respawn starts fresh.
             private _stamina = getStamina player;

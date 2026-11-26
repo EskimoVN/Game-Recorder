@@ -37,6 +37,7 @@ Của Eskimo, trong `@OdxEskimo`:
 - Vô hạn băng đạn: bắn hết thì thay đạn bình thường. Mỗi lần thay, kho đồ được thêm lại một băng cùng loại, nên không bao giờ hết băng. Lựu đạn, mìn được trả lại.
 - Thể lực gấp đôi: chạy nhanh lâu gấp đôi trước khi mệt, nghỉ thì hồi nhanh gấp đôi.
   Súng trên xe chỉ được nạp lại khi xe do máy mình điều khiển.
+- Bấm Home mở Arsenal: chọn mọi súng, kèm ống ngắm, giảm thanh, đèn, laser, chân súng. Chỉ mở trước khi bắt đầu round. Hồi sinh thì giữ bộ đồ đã chọn.
 - Ẩn lại HUD ở mọi khung hình, phòng khi mission bật HUD lên giữa trận.
 - Xoá thứ công ty chưa xoá: hint, tip, thông báo, khung chat, phụ đề.
 - Xoá HUD do mission tự vẽ, ví dụ tiền CP và thu nhập mỗi phút của Warlords.
