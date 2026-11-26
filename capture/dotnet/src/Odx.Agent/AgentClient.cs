@@ -698,6 +698,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
             files.WriteTo(raw);
             long last = PlayerTimeline.WriteRoundEvents(kept, RoundRecord.Load(raw), _eventReceipts);
             foreach (long id in _eventReceipts.Keys.Where(id => id <= last)) _eventReceipts.TryRemove(id, out _);
+            Episode.Seal(kept);
             Manifest.Write(kept);
         }
         catch (Exception e) when (e is IOException or JsonException or FormatException or InvalidDataException)

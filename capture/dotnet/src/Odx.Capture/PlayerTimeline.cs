@@ -50,7 +50,7 @@ public static class PlayerTimeline
         File.WriteAllLines(path, events.Select(e => e.ToJsonString(AgentMessage.Json)));
 
     /// <summary>
-    /// events.jsonl of a player's round folder: the round's server events (raw/server_events.jsonl) on this player's video,
+    /// annotations/events.jsonl of a player's round folder (the episode's event timeline): the round's server events (raw/server_events.jsonl) on this player's video,
     /// with the fields of the client's multiplayer delivery: when the event's notice reached this machine
     /// (local_receive_utc, local_receive_time_us; absent when it never did) and the server time on this machine's clock
     /// (server_time_as_local_us, from player.json's offset). Fields are in the sample's order, its times to the microsecond,
@@ -69,7 +69,9 @@ public static class PlayerTimeline
         var frameUtc = recorded && ServerClock(captureDir, round.TimePort) is { } clock ? FrameUtc(captureDir, clock.Map) : null;
         double? offsetMs = PlayerFile.OffsetMs(captureDir);
         long last = 0;
-        WriteEvents(Path.Combine(captureDir, "events.jsonl"), events.Select(e =>
+        string path = Path.Combine(captureDir, Episode.EventsFile);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        WriteEvents(path, events.Select(e =>
         {
             var copy = new JsonObject();
             foreach (string key in StampFields)
@@ -85,7 +87,13 @@ public static class PlayerTimeline
             }
             if (offsetMs is double offset && copy["server_time_us"]?.GetValue<long>() is long serverUs)
                 copy["server_time_as_local_us"] = serverUs - (long)Math.Round(offset * 1000);
-            if (frameUtc is { Count: > 0 }) copy["video_time_ms"] = Math.Round(GameEvents.UtcMs(e) - frameUtc[0], 3);
+            if (frameUtc is { Count: > 0 })
+            {
+                double videoMs = GameEvents.UtcMs(e) - frameUtc[0];
+                copy["video_time_ms"] = Math.Round(videoMs, 3);
+                // TIM-08: annotation times in seconds from the primary camera's first frame.
+                copy["time_s"] = Math.Round(videoMs / 1000, 6);
+            }
             return copy;
         }).ToList());
         return last;

@@ -8,6 +8,7 @@
     <PackageReference Include="JsonSchema.Net" Version="7.3.4" />
     <PackageReference Include="Google.Protobuf" Version="3.28.3" />
     <PackageReference Include="Grpc.Tools" Version="2.67.0" PrivateAssets="all" />
+    <PackageReference Include="Parquet.Net" Version="6.1.0" />
   </ItemGroup>
   <ItemGroup>
     <Protobuf Include="client_mp.proto" GrpcServices="None" />

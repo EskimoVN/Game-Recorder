@@ -56,7 +56,8 @@ public static class SessionBuilder
         var (mapped, unbound) = MapInputs(events, profile.Bindings, times[0] - 1000.0 / fps);
         var inputs = Frames.AggregateInputs(times, mapped);
         int width = Required<int>(recording, "width"), height = Required<int>(recording, "height");
-        var cameras = CameraPerFrame(cameraDir ?? captureDir, frames, width, height);
+        var camera = ReadCamera(cameraDir ?? captureDir);
+        var cameras = camera is { } c ? CameraPerFrame(c.Info, c.Samples, frames, width, height) : null;
         var rows = frames.Select((f, i) => new FrameRow(i,
             (long)Math.Round(f.TGridMs - times[0]), cameras?[i]?.C2w, cameras?[i] is null ? null : cameras.Model,
             cameras?[i]?.Intrinsics, inputs[i])).ToList();
@@ -101,9 +102,17 @@ public static class SessionBuilder
         };
         File.WriteAllText(Path.Combine(captureDir, "session.json"), session.ToJsonString(Json));
         WriteKeyBindings(captureDir, profile);
+        var frameUtc = times.Select(clockMap.ToUnixMs).ToList();
         ClientFramesBin.Write(Path.Combine(captureDir, ClientFramesBin.FileName), sessionId, rows,
-            times.Select(t => t - times[0]).ToList(), times.Select(clockMap.ToUnixMs).ToList(), config);
-        PlayerFile.Write(captureDir, session, startUnixMs, player, config.VendorName);
+            times.Select(t => t - times[0]).ToList(), frameUtc, config);
+        var playerJson = PlayerFile.Write(captureDir, session, startUnixMs, player, config.VendorName);
+        // The camera log runs a little before and after the video; the episode keeps what lies within its frames.
+        var cameraStream = camera?.Samples.Where(x => x.TQpcMs >= times[0] - 1000.0 / fps && x.TQpcMs <= times[^1])
+            .Select(x => (clockMap.ToUnixMs(x.TQpcMs), camera.Value.Info.ToCanonical(x, width, height)))
+            .Select(x => (x.Item1, x.Item2.C2w, x.Item2.Intrinsics)).ToList();
+        Episode.Write(captureDir, new EpisodeSource(captureId, sessionId, fps, width, height, rows, frameUtc,
+            mapped.Where(e => e.TQpcMs <= times[^1]).Select(e => (clockMap.ToUnixMs(e.TQpcMs), e)).ToList(),
+            cameraStream, cameras?.Model, profile, playerJson));
         return new BuildReport(sessionId, frames.Count, durationMs, unbound, cameras?.Count(c => c is not null) ?? 0, clock, gridOriginOffset);
     }
 
@@ -123,14 +132,11 @@ public static class SessionBuilder
 
     /// <summary>
     /// For each video frame, the newest camera sample taken at or before the frame was captured (t_source): the Present
-    /// that produced the image comes just before Windows.Graphics.Capture delivers it. Null when there are no samples.
+    /// that produced the image comes just before Windows.Graphics.Capture delivers it.
     /// </summary>
-    private static FrameCameras? CameraPerFrame(string dir, List<GridTick> frames, int width, int height)
+    private static FrameCameras CameraPerFrame(ExtractorInfo info, List<CameraSample> samples, List<GridTick> frames, int width,
+        int height)
     {
-        string samplesPath = CaptureFolder.Raw(dir, "camera_samples.csv"), infoPath = CaptureFolder.Raw(dir, "extractor.json");
-        if (!File.Exists(samplesPath) || !File.Exists(infoPath)) return null;
-        var info = ExtractorInfo.Load(infoPath);
-        var samples = CameraSampleReader.Read(samplesPath).OrderBy(s => s.TQpcMs).ToList();
         var result = new FrameCameras(info.CameraModel, frames.Count);
         int j = -1;
         foreach (var f in frames)
@@ -141,6 +147,14 @@ public static class SessionBuilder
                 : null);
         }
         return result;
+    }
+
+    /// <summary>camera_samples.csv (sorted by time) and extractor.json; null without them.</summary>
+    private static (ExtractorInfo Info, List<CameraSample> Samples)? ReadCamera(string dir)
+    {
+        string samplesPath = CaptureFolder.Raw(dir, "camera_samples.csv"), infoPath = CaptureFolder.Raw(dir, "extractor.json");
+        if (!File.Exists(samplesPath) || !File.Exists(infoPath)) return null;
+        return (ExtractorInfo.Load(infoPath), CameraSampleReader.Read(samplesPath).OrderBy(s => s.TQpcMs).ToList());
     }
 
     /// <summary>

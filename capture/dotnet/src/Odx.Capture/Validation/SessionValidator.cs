@@ -27,7 +27,7 @@ public static class SessionValidator
 
         try
         {
-            var (header, rows) = Csv.ReadFile(Path.Combine(sessionDir, "frames.csv"));
+            var (header, rows) = Csv.ReadFile(CaptureFolder.Find(sessionDir, "frames.csv"));
             data.LoadFrames(header, rows);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
@@ -42,13 +42,13 @@ public static class SessionValidator
         }
         issues.AddRange(Run(data, Needs.FramesFile, Needs.FramesHeader, Needs.FrameRows, Needs.Camera));
 
-        if (video && VideoIssue(data, Path.Combine(sessionDir, "video.mp4")) is { } videoIssue) issues.Add(videoIssue);
+        if (video && VideoIssue(data, CaptureFolder.Video(sessionDir)) is { } videoIssue) issues.Add(videoIssue);
         if (video) issues.AddRange(Run(data, Needs.Video));
         if (video && decode && data.Video is not null)
         {
             try
             {
-                long decoded = VideoTrim.DecodedFrameCount(ExternalTools.Ffmpeg(), Path.Combine(sessionDir, "video.mp4"));
+                long decoded = VideoTrim.DecodedFrameCount(ExternalTools.Ffmpeg(), CaptureFolder.Video(sessionDir));
                 if (decoded != data.Rows.Count)
                     issues.Add(Issue.Error("video.decoded_frame_count", $"{decoded} frames decode vs {data.Rows.Count} frames.csv rows"));
             }
