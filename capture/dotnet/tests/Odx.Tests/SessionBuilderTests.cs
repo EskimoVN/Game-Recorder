@@ -140,7 +140,11 @@ public class SessionBuilderTests
             Assert.Equal("2026-10-04T10:00:44.000Z", session["created_at_utc"]!.GetValue<string>());
             Assert.Equal("sntp", session["vendor_clock_sync"]!["source"]!.GetValue<string>());
             var clock = JsonNode.Parse(File.ReadAllText(Path.Combine(dir, Episode.FileName)))!["clock"]!;
-            Assert.InRange((long)clock["sync_accuracy_ns"]!, 12_500_000, 12_500_000 + 1_000_000_000 / 60);
+            // No pose here: only how far pictures are from their frame times, which no longer includes the UTC error.
+            Assert.InRange((long)clock["sync_accuracy_ns"]!, 0, 1_000_000_000 / 60);
+            var alignment = JsonNode.Parse(File.ReadAllText(Path.Combine(dir, Episode.MetadataFile)))!["alignment"]!;
+            Assert.Equal(12_500_000, (long)alignment["utc_error_ns"]!);
+            Assert.Null(alignment["camera_pose_time_offset_ns"]);
             var player = JsonNode.Parse(File.ReadAllText(Path.Combine(dir, PlayerFile.FileName)))!;
             Assert.Equal(44_000, (double)player["clock_sync"]!["offset_ms"]!);
             Assert.Equal(PlayerFile.OffsetDefinition, (string?)player["clock_sync"]!["offset_definition"]);
@@ -281,6 +285,46 @@ public class SessionBuilderTests
             {"capture_id": "cap-0001", "width": 320, "height": 180, "screen_width": 1920, "screen_height": 1080, "fps": 60}
             """);
         if (SessionFixtures.HasFfmpeg) SessionFixtures.MakeVideo(Path.Combine(dir, "video.mp4"));
+    }
+}
+
+public class PoseLagTests
+{
+    [Fact]
+    public void Finds_how_many_frames_the_pose_runs_ahead_of_the_picture()
+    {
+        var rng = new Random(7);
+        var motion = Enumerable.Range(0, 1800).Select(_ => rng.NextDouble() < 0.2 ? rng.NextDouble() : 0).ToList();
+        // The picture shows each pose 1.5 frames later, with some noise.
+        var picture = motion.Select((_, i) => (i >= 2 ? (motion[i - 1] + motion[i - 2]) / 2 : 0) + 0.05 * rng.NextDouble()).ToList();
+
+        var lag = PoseLag.Measure(motion, picture, fps: 30)!;
+
+        Assert.Equal(6, lag.Windows);
+        Assert.Equal(6, lag.Usable);
+        Assert.InRange(lag.LagFrames, 1.3, 1.7);
+        Assert.InRange(lag.SpreadFrames, 0, 0.2);
+    }
+
+    [Fact]
+    public void Nothing_moving_gives_no_lag()
+    {
+        var still = Enumerable.Repeat(0.0, 900).ToList();
+        Assert.Null(PoseLag.Measure(still, still, fps: 30));
+    }
+
+    [Fact]
+    public void Camera_motion_is_the_turn_between_frames()
+    {
+        static double[,] Facing(double yaw)
+        {
+            // Forward (sin yaw, cos yaw, 0) in world RFU; column 2 is backward.
+            var m = new double[4, 4];
+            m[0, 2] = -Math.Sin(yaw); m[1, 2] = -Math.Cos(yaw); m[3, 3] = 1;
+            return m;
+        }
+        var motion = PoseLag.CameraMotion([Facing(0), Facing(0.1), null, Facing(0.1), Facing(-0.2)]);
+        Assert.Equal([0, 0.1, 0, 0, 0.3], motion.Select(x => Math.Round(x, 9)));
     }
 }
 

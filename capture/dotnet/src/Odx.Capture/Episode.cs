@@ -13,10 +13,12 @@ namespace Odx.Capture;
 /// <param name="Camera">The camera at its own rate (Unix ms, canonical C2W, intrinsics); null without camera samples.</param>
 /// <param name="Player">player.json as <see cref="PlayerFile.Write"/> built it.</param>
 /// <param name="SyncAccuracyMs">clock.sync_accuracy_ns in ms (TIM-05); null when not measured.</param>
+/// <param name="PoseOffsetMs">How much later the pose was moved to meet the picture (TIM-06); null when not measured.</param>
+/// <param name="UtcErrorMs">Bound on the session clock's error against UTC (<see cref="ClockSync.UtcErrorMs"/>).</param>
 public sealed record EpisodeSource(string CaptureId, string SessionId, double Fps, int Width, int Height,
     IReadOnlyList<FrameRow> Rows, IReadOnlyList<double> FrameUtcMs, IReadOnlyList<(double UtcMs, InputEvent Event)> Inputs,
     IReadOnlyList<(double UtcMs, double[,] C2w, Intrinsics Intrinsics)>? Camera, string? CameraModel, GameProfile Profile,
-    JsonObject Player, double? SyncAccuracyMs);
+    JsonObject Player, double? SyncAccuracyMs, double? PoseOffsetMs = null, double? UtcErrorMs = null);
 
 /// <summary>
 /// A player's round folder as one episode of the client's Data Delivery Format (§1, §4–§6, §8 games): episode.json,
@@ -97,7 +99,7 @@ public static class Episode
                 ["unit"] = "ns",
                 ["capture_start_ns"] = startNs,
                 ["capture_end_ns"] = endNs,
-                ["sync_accuracy_ns"] = s.SyncAccuracyMs is double ms ? (long)Math.Round(ms * 1e6) : null,
+                ["sync_accuracy_ns"] = Ns(s.SyncAccuracyMs),
             },
             ["domain_metadata"] = new JsonObject { ["path"] = MetadataFile, ["size_bytes"] = null, ["sha256"] = null },
             ["cameras"] = new JsonArray(new JsonObject
@@ -232,6 +234,14 @@ public static class Episode
                 ["has_game_state"] = false,
             },
             ["signals"] = Signals,
+            // TIM-06/09: the alignment applied and the clock's error against UTC, which sync_accuracy_ns leaves out.
+            ["alignment"] = new JsonObject
+            {
+                ["camera_pose_time_offset_ns"] = Ns(s.PoseOffsetMs),
+                ["camera_pose_time_offset"] = "added to the game's camera times so each pose meets the picture that shows it, " +
+                    "measured per episode from camera rotation against picture change; video and actions are not shifted",
+                ["utc_error_ns"] = Ns(s.UtcErrorMs),
+            },
             ["participants"] = new JsonArray(participant),
             ["input_mappings"] = new JsonObject
             {
@@ -267,6 +277,8 @@ public static class Episode
             .Select(p => new JsonObject { ["player_id"] = p.PlayerId, ["name"] = p.Name, ["camera_id"] = null })]);
         WriteJson(metadataPath, metadata);
     }
+
+    private static long? Ns(double? ms) => ms is double v ? (long)Math.Round(v * 1e6) : null;
 
     private static JsonObject TaskInfo(string? taskId, string? matchId, string? map) =>
         new() { ["task_id"] = taskId, ["match_id"] = matchId, ["map"] = map };
