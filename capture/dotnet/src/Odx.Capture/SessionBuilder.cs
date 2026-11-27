@@ -63,7 +63,10 @@ public static class SessionBuilder
         var cameras = camera is { } c ? CameraPerFrame(c.Info, c.Samples, frames, width, height) : null;
         PoseLag.Result? lag = null;
         double? poseOffsetMs = null;
-        if (camera is { } cam && PoseLag.PictureChange(CaptureFolder.Video(captureDir)) is { } change)
+        // The recorder measures the picture change (video_frames.csv); a log without it has the video decoded instead.
+        if (camera is { } cam && (frames.All(f => f.PictureChange is not null)
+                ? [.. frames.Select(f => f.PictureChange!.Value)]
+                : PoseLag.PictureChange(CaptureFolder.Video(captureDir))) is { } change)
         {
             lag = PoseLag.Measure(PoseLag.CameraMotion([.. cameras!.Select(x => x?.C2w)]), change, fps);
             if (lag is not null)

@@ -21,6 +21,8 @@ internal sealed class FrameWriter
     private readonly BlockingCollection<(byte[]? Frame, IReadOnlyList<GridTick> Ticks)> _queue = new();
     private readonly Thread _thread;
     private readonly byte[] _black;
+    private readonly int _width, _height;
+    private byte[]? _lastThumbnail;
     private long _written, _writeMs, _writeMaxMs;
     private volatile string? _error;
 
@@ -31,10 +33,12 @@ internal sealed class FrameWriter
     /// <summary>Why frames stopped being written (ffmpeg closed its input); later ticks are dropped.</summary>
     public string? Error => _error;
 
-    public FrameWriter(FfmpegEncoder encoder, VideoFrameLogWriter log, int frameBytes)
+    public FrameWriter(FfmpegEncoder encoder, VideoFrameLogWriter log, int width, int height)
     {
         _encoder = encoder;
         _log = log;
+        (_width, _height) = (width, height);
+        int frameBytes = width * height * 3 / 2;
         for (int i = 0; i < Buffers; i++) _free.Add(new byte[frameBytes]);
         // NV12 black: Y 16, Cb/Cr 128 (limited range); the Y plane is two thirds of the frame.
         _black = new byte[frameBytes];
@@ -83,6 +87,9 @@ internal sealed class FrameWriter
     {
         foreach (var (frame, ticks) in _queue.GetConsumingEnumerable())
         {
+            var thumbnail = PictureThumbnail.FromLuma(frame ?? _black, _width, _height);
+            double change = _lastThumbnail is null ? 0 : PictureThumbnail.Change(_lastThumbnail, thumbnail);
+            _lastThumbnail = thumbnail;
             foreach (var t in ticks)
             {
                 if (_error is not null) break;
@@ -102,7 +109,7 @@ internal sealed class FrameWriter
                 if (ms > Interlocked.Read(ref _writeMaxMs)) Interlocked.Exchange(ref _writeMaxMs, ms);
                 try
                 {
-                    _log.Write(t);
+                    _log.Write(t with { PictureChange = t.Duplicate ? 0 : change });
                 }
                 catch (ObjectDisposedException)
                 {

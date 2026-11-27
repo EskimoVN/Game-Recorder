@@ -161,7 +161,7 @@ public static class RecordCommand
             var nv12 = StartConverter();
             var started = new FfmpegEncoder(opts.Ffmpeg, Path.Combine(opts.OutDir, VideoFinalize.RawVideo), width, height, opts.Fps,
                 encoderName.Result);
-            writer = new FrameWriter(started, frameLog, nv12.FrameBytes);
+            writer = new FrameWriter(started, frameLog, nv12.Width, nv12.Height);
             shown = writer.Rent();
             return started;
         }
@@ -647,14 +647,13 @@ public static class RecordCommand
             mapping.Capture = 0;
             return (null, $"backbuffer {width}x{height} is larger than the present contract's {PresentMapping.MaxWidth}x{PresentMapping.MaxHeight}");
         }
-        int frameBytes = width * height * 3 / 2;
         string encoder = EncoderChoice.Resolve(opts.Ffmpeg, opts.Encoder);
         string source = $"present:{Path.GetFileNameWithoutExtension(processName)}";
 
         using var frameLog = new VideoFrameLogWriter(new StreamWriter(Path.Combine(opts.OutDir, "video_frames.csv")) { AutoFlush = true });
         var resampler = new GridResampler(opts.Fps, originMs);
         var encoderProc = new FfmpegEncoder(opts.Ffmpeg, Path.Combine(opts.OutDir, VideoFinalize.RawVideo), width, height, opts.Fps, encoder);
-        var writer = new FrameWriter(encoderProc, frameLog, frameBytes);
+        var writer = new FrameWriter(encoderProc, frameLog, width, height);
 
         double startQpcMs = QpcClock.NowMs();
         var startUtc = DateTimeOffset.UtcNow;

@@ -106,10 +106,41 @@ public class VideoFrameLogTests
     {
         var sw = new StringWriter();
         var log = new VideoFrameLogWriter(sw);
-        log.Write(new GridTick(0, 1000, 1000, false));
-        log.Write(new GridTick(1, 1016.6666666666666, 1000, true));
-        log.Write(new GridTick(2, 1033.3333333333333, 1031.25, false));
+        log.Write(new GridTick(0, 1000, 1000, false, PictureChange: 0));
+        log.Write(new GridTick(1, 1016.6666666666666, 1000, true, PictureChange: 0));
+        log.Write(new GridTick(2, 1033.3333333333333, 1031.25, false, PictureChange: 12.5));
         var expected = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "fixtures", "video_frames.csv"));
         Assert.Equal(expected, sw.ToString());
+    }
+
+    [Fact]
+    public void A_log_without_picture_change_reads_as_unmeasured()
+    {
+        string path = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllText(path, "frame_index,t_grid_qpc_ms,t_source_qpc_ms,duplicate\n0,1000,1000,0\n");
+            Assert.Null(Assert.Single(VideoFrameLogReader.Read(path)).PictureChange);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Thumbnail_averages_cells_and_change_is_the_mean_difference()
+    {
+        const int w = 128, h = 72;
+        var luma = new byte[w * h * 3 / 2];   // NV12: the chroma after the luma is ignored
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+                luma[y * w + x] = (byte)(x < w / 2 ? 40 : 200);
+        var thumb = PictureThumbnail.FromLuma(luma, w, h);
+        Assert.Equal(PictureThumbnail.Width * PictureThumbnail.Height, thumb.Length);
+        Assert.Equal(40, thumb[0]);
+        Assert.Equal(200, thumb[PictureThumbnail.Width - 1]);
+        Assert.Equal(0, PictureThumbnail.Change(thumb, thumb));
+        Assert.Equal(120, PictureThumbnail.Change(thumb, PictureThumbnail.FromLuma(new byte[w * h], w, h)));
     }
 }
