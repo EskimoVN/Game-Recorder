@@ -307,6 +307,15 @@ public class PoseLagTests
     }
 
     [Fact]
+    public void A_lag_beyond_the_search_is_not_taken_for_one_at_its_edge()
+    {
+        var rng = new Random(7);
+        var motion = Enumerable.Range(0, 900).Select(_ => rng.NextDouble() < 0.2 ? rng.NextDouble() : 0).ToList();
+        var picture = motion.Select((_, i) => i >= 9 ? motion[i - 9] : 0).ToList();
+        Assert.Null(PoseLag.Measure(motion, picture, fps: 30));
+    }
+
+    [Fact]
     public void Nothing_moving_gives_no_lag()
     {
         var still = Enumerable.Repeat(0.0, 900).ToList();
