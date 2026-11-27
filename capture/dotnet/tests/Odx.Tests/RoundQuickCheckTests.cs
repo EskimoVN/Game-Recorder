@@ -174,12 +174,12 @@ public class RoundQuickCheckTests
     }
 
     [Fact]
-    public void Required_files_are_the_episode_ones_but_the_room_events_and_the_camera_pose()
+    public void Required_files_are_the_episode_ones_but_the_camera_pose()
     {
         Assert.Equal(new[] { "episode.json", "frames.parquet", "sensors.json", "videos/pov.mp4", "streams/actions.parquet", "metadata/games.json" },
             RoundQuickCheck.RequiredFiles);
         Assert.Superset(CaptureFolder.Delivered.ToHashSet(), RoundQuickCheck.RequiredFiles.ToHashSet());
-        Assert.DoesNotContain(Episode.EventsFile, RoundQuickCheck.RequiredFiles);
+        Assert.DoesNotContain(Episode.CameraPoseFile, RoundQuickCheck.RequiredFiles);
     }
 
     [Fact]

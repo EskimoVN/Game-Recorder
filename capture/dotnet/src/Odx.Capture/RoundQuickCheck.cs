@@ -26,9 +26,8 @@ public static partial class RoundQuickCheck
     public const double LongSilenceSeconds = 10;
 
     /// <summary>
-    /// The episode's files (Episode, laid out by CaptureFolder.Tidy) but annotations/events.jsonl, which the agent writes once
-    /// the whole room is done (AgentClient.KeepRoundFiles), and streams/camera_pose.parquet, which only a camera log gives
-    /// (its coverage is the company's QC).
+    /// The episode's files (Episode, laid out by CaptureFolder.Tidy) but streams/camera_pose.parquet, which only a camera log
+    /// gives (its coverage is the company's QC).
     /// </summary>
     public static readonly IReadOnlyList<string> RequiredFiles =
         [.. CaptureFolder.Delivered, Episode.VideoFile, Episode.ActionsFile, Episode.MetadataFile];
