@@ -13,15 +13,17 @@ namespace Odx.Capture;
 /// <param name="Camera">The camera at its own rate (Unix ms, canonical C2W, intrinsics); null without camera samples.</param>
 /// <param name="Player">player.json as <see cref="PlayerFile.Write"/> built it.</param>
 /// <param name="SyncAccuracyMs">clock.sync_accuracy_ns in ms (TIM-05); null when not measured.</param>
+/// <param name="PoseOffsetMs">How much later the pose was moved to meet the picture (TIM-06); null when not measured.</param>
+/// <param name="UtcErrorMs">Bound on the session clock's error against UTC (<see cref="ClockSync.UtcErrorMs"/>).</param>
 public sealed record EpisodeSource(string CaptureId, string SessionId, double Fps, int Width, int Height,
     IReadOnlyList<FrameRow> Rows, IReadOnlyList<double> FrameUtcMs, IReadOnlyList<(double UtcMs, InputEvent Event)> Inputs,
     IReadOnlyList<(double UtcMs, double[,] C2w, Intrinsics Intrinsics)>? Camera, string? CameraModel, GameProfile Profile,
-    JsonObject Player, double? SyncAccuracyMs);
+    JsonObject Player, double? SyncAccuracyMs, double? PoseOffsetMs = null, double? UtcErrorMs = null);
 
 /// <summary>
 /// A player's round folder as one episode of the client's Data Delivery Format (§1, §4–§6, §8 games): episode.json,
 /// metadata/games.json, videos/pov.mp4, frames.parquet, sensors.json, streams/actions.parquet and
-/// streams/camera_pose.parquet, annotations/events.jsonl once the round's events are in. delivery.json and
+/// streams/camera_pose.parquet; no events or game state (agreed with the client 2026-11-27). delivery.json and
 /// manifest.parquet belong to the delivery, not the episode. raw/ keeps the working files and is not part of the episode.
 /// </summary>
 public static class Episode
@@ -32,7 +34,6 @@ public static class Episode
     public const string SensorsFile = "sensors.json";
     public const string ActionsFile = "streams/actions.parquet";
     public const string CameraPoseFile = "streams/camera_pose.parquet";
-    public const string EventsFile = "annotations/events.jsonl";
     public const string VideoFile = VideoFinalize.Delivered;
     public const string CameraId = "pov";
     private const string WorldConvention = "world RFU right-handed: X right/east, Y forward/north, Z up";
@@ -48,7 +49,7 @@ public static class Episode
         ["camera_radial_k1", "camera_radial_k2", "camera_radial_k3", "camera_radial_k4", "camera_radial_k5", "camera_radial_k6",
          "camera_tangential_p1", "camera_tangential_p2"];
 
-    /// <summary>Writes every episode file but the video and the events, and episode.json without sizes and checksums (<see cref="Seal"/>).</summary>
+    /// <summary>Writes every episode file but the video, and episode.json without sizes and checksums (<see cref="Seal"/>).</summary>
     public static void Write(string dir, EpisodeSource s, CaptureConfig config)
     {
         foreach (string sub in new[] { MetadataFile, ActionsFile }) Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(dir, sub))!);
@@ -61,8 +62,12 @@ public static class Episode
         WriteJson(Path.Combine(dir, SensorsFile), Sensors(s));
         WriteJson(Path.Combine(dir, MetadataFile), Metadata(s));
 
-        double durationS = s.Rows.Count / s.Fps;
         long startNs = frameNs[0];
+        // The last frame's display interval on the session clock: frame times carry the QPC rate the clock fit found, so
+        // count/fps would miss the end by that rate (2.5 ms over 4 minutes at 10 ppm).
+        double frameNsStep = frameNs.Length > 1 ? (frameNs[^1] - startNs) / (frameNs.Length - 1.0) : 1e9 / s.Fps;
+        long endNs = frameNs[^1] + (long)Math.Round(frameNsStep);
+        double durationS = (endNs - startNs) / 1e9;
         var timebase = new JsonObject { ["clock"] = "episode", ["column"] = "timestamp_ns" };
         var artifacts = new JsonArray
         {
@@ -93,8 +98,8 @@ public static class Episode
                 ["domain"] = "utc_unix",
                 ["unit"] = "ns",
                 ["capture_start_ns"] = startNs,
-                ["capture_end_ns"] = startNs + (long)Math.Round(durationS * 1e9),
-                ["sync_accuracy_ns"] = s.SyncAccuracyMs is double ms ? (long)Math.Round(ms * 1e6) : null,
+                ["capture_end_ns"] = endNs,
+                ["sync_accuracy_ns"] = Ns(s.SyncAccuracyMs),
             },
             ["domain_metadata"] = new JsonObject { ["path"] = MetadataFile, ["size_bytes"] = null, ["sha256"] = null },
             ["cameras"] = new JsonArray(new JsonObject
@@ -126,8 +131,8 @@ public static class Episode
     }
 
     /// <summary>
-    /// Fills episode.json's sizes and SHA-256 (PTH-04) and the video's encoding from the file, lists
-    /// annotations/events.jsonl once it is there and drops artifacts whose file is gone. Nothing to do without episode.json.
+    /// Fills episode.json's sizes and SHA-256 (PTH-04) and the video's encoding from the file, the round's players and task
+    /// from raw/round.json, and drops artifacts whose file is gone. Nothing to do without episode.json.
     /// </summary>
     public static void Seal(string dir, CaptureConfig? config = null)
     {
@@ -135,10 +140,8 @@ public static class Episode
         if (!File.Exists(path)) return;
         var episode = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
         var artifacts = episode["artifacts"]!.AsArray();
-        if (File.Exists(Path.Combine(dir, EventsFile)) && artifacts.All(a => a!["path"]!.GetValue<string>() != EventsFile))
-            artifacts.Add(Artifact("events", "annotations", EventsFile, config ?? CaptureConfig.Load(), null));
         string round = CaptureFolder.Raw(dir, RoundRecord.FileName);
-        if (File.Exists(round)) AddRoundPlayers(Path.Combine(dir, MetadataFile), RoundRecord.Load(Path.GetDirectoryName(round)!));
+        if (File.Exists(round)) AddRound(Path.Combine(dir, MetadataFile), RoundRecord.Load(Path.GetDirectoryName(round)!));
         foreach (var gone in artifacts.Where(a => !File.Exists(Path.Combine(dir, a!["path"]!.GetValue<string>()))).ToList())
             artifacts.Remove(gone);
         foreach (var node in artifacts.Append(episode["domain_metadata"]).Concat(episode["cameras"]!.AsArray()))
@@ -221,6 +224,24 @@ public static class Episode
                 ["units"] = "meter",
                 ["game_axes"] = p["coordinate_system"]?["axes"]?.DeepClone(),
             },
+            ["task"] = TaskInfo(null, null, null),
+            // EPI-05 capabilities: which signals this episode has.
+            ["capabilities"] = new JsonObject
+            {
+                ["has_actions"] = true,
+                ["has_camera_pose"] = s.Camera is not null,
+                ["has_events"] = false,
+                ["has_game_state"] = false,
+            },
+            ["signals"] = Signals,
+            // TIM-06/09: the alignment applied and the clock's error against UTC, which sync_accuracy_ns leaves out.
+            ["alignment"] = new JsonObject
+            {
+                ["camera_pose_time_offset_ns"] = Ns(s.PoseOffsetMs),
+                ["camera_pose_time_offset"] = "added to the game's camera times so each pose meets the picture that shows it, " +
+                    "measured per episode from camera rotation against picture change; video and actions are not shifted",
+                ["utc_error_ns"] = Ns(s.UtcErrorMs),
+            },
             ["participants"] = new JsonArray(participant),
             ["input_mappings"] = new JsonObject
             {
@@ -242,12 +263,13 @@ public static class Episode
 
     /// <summary>
     /// VTM-04: every player of the round (round.json) in participants, this episode's own first; the others have their own
-    /// episodes in the same session_id, so their camera_id is null here.
+    /// episodes in the same session_id, so their camera_id is null here. EPI-05's task: the round's task ID, match and map.
     /// </summary>
-    private static void AddRoundPlayers(string metadataPath, RoundRecord round)
+    private static void AddRound(string metadataPath, RoundRecord round)
     {
         if (!File.Exists(metadataPath)) return;
         var metadata = JsonNode.Parse(File.ReadAllText(metadataPath))!.AsObject();
+        metadata["task"] = TaskInfo(round.SessionId, round.MatchId, round.Map);
         var participants = metadata["participants"]!.AsArray();
         var own = participants.Where(p => (string?)p!["camera_id"] == CameraId).Select(p => p!.DeepClone()).ToList();
         var ownIds = own.Select(p => (string?)p["player_id"]).ToHashSet();
@@ -255,6 +277,36 @@ public static class Episode
             .Select(p => new JsonObject { ["player_id"] = p.PlayerId, ["name"] = p.Name, ["camera_id"] = null })]);
         WriteJson(metadataPath, metadata);
     }
+
+    private static long? Ns(double? ms) => ms is double v ? (long)Math.Round(v * 1e6) : null;
+
+    private static JsonObject TaskInfo(string? taskId, string? matchId, string? map) =>
+        new() { ["task_id"] = taskId, ["match_id"] = matchId, ["map"] = map };
+
+    /// <summary>TIM-09 and EPI-05 signal conventions: units, clock and coordinates of every signal file.</summary>
+    private static JsonObject Signals => new()
+    {
+        ["clock"] = "timestamp_ns in every file: Unix ns on the episode clock (episode.json clock, utc_unix)",
+        ["pose"] = $"C2W_M00..M33: camera-to-world 4x4, row-major; {WorldConvention}; columns right, up, backward, translation; meters",
+        ["intrinsics"] = "camera_fx, camera_fy, camera_cx, camera_cy: pixels of videos/pov.mp4; no distortion",
+        ["frames"] = new JsonObject
+        {
+            ["pose_valid"] = "false where the game gave no camera within 100 ms of the frame: C2W and intrinsics are null",
+            ["input_keys"] = "keys held at the frame's start or pressed during it, in press order, joined by |",
+            ["input_actions"] = "the game actions of those keys and buttons (input_mappings.bindings), joined by |",
+            ["input_mouse_buttons"] = "mouse buttons, as input_keys",
+            ["input_mouse_dx"] = "raw mouse counts summed over (previous frame, this frame], before the game's sensitivity; + right",
+            ["input_mouse_dy"] = "raw mouse counts, as input_mouse_dx; + down",
+        },
+        ["actions"] = new JsonObject
+        {
+            ["kind"] = new JsonArray("key_down", "key_up", "button_down", "button_up", "action_start", "action_end", "mouse_move"),
+            ["value"] = "key name, mouse button or game action; null for mouse_move",
+            ["dx"] = "mouse_move: raw mouse counts (Raw Input), before the game's sensitivity; + right; 0 otherwise",
+            ["dy"] = "mouse_move: raw mouse counts; + down; 0 otherwise",
+        },
+        ["camera_pose"] = "one row per camera update of the game, at its own rate; pose and intrinsics as above",
+    };
 
     /// <summary>FRM-05: one record per sensor; the game camera's intrinsics and pose change every frame, so they point at the columns.</summary>
     private static JsonObject Sensors(EpisodeSource s)
@@ -304,7 +356,9 @@ public static class Episode
             .Add("camera_frame_index", rows.Select((_, i) => (long)i).ToArray())
             .Add("timestamp_ns", frameNs)
             // Every row is a frame of the video; whether a repeated (duplicate) frame counts as invalid is still open.
-            .Add("image_valid", rows.Select(_ => true).ToArray());
+            .Add("image_valid", rows.Select(_ => true).ToArray())
+            // FRM-03: the pose columns are null on these rows, and this says so.
+            .Add("pose_valid", rows.Select(r => r.C2w is not null).ToArray());
         for (int k = 0; k < 16; k++)
         {
             int i = k;

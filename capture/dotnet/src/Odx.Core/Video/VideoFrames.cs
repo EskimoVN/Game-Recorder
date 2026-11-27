@@ -8,7 +8,49 @@ namespace Odx.Core;
 /// <param name="TSourceMs">QPC ms of the captured frame shown (WGC SystemRelativeTime); the grid time itself for a black frame.</param>
 /// <param name="Duplicate">True if this captured frame was already emitted (no new frame since the last tick), and for a black frame.</param>
 /// <param name="Black">No frame had been captured by this tick (a grid that starts before the capture did): the frame is black.</param>
-public readonly record struct GridTick(long Index, double TGridMs, double TSourceMs, bool Duplicate, bool Black = false);
+/// <param name="PictureChange">How much the picture changed from the previous video frame (<see cref="PictureThumbnail.Change"/>);
+/// null where the recorder did not measure it (OBS, logs before 0.3.12).</param>
+public readonly record struct GridTick(long Index, double TGridMs, double TSourceMs, bool Duplicate, bool Black = false,
+    double? PictureChange = null);
+
+/// <summary>
+/// A 64×36 grey thumbnail of a frame and how much two of them differ: what odx build's PoseLag lines up with the camera's
+/// rotation. The recorder takes it from the NV12 frame it encodes, so the video need not be decoded again.
+/// </summary>
+public static class PictureThumbnail
+{
+    public const int Width = 64, Height = 36;
+    /// <summary>Every Step-th pixel of every Step-th row is averaged into its cell: enough for motion, a sixteenth of the reads.</summary>
+    private const int Step = 4;
+
+    /// <summary>Mean of each cell of a packed luma plane (NV12's Y: the first width × height bytes).</summary>
+    public static byte[] FromLuma(ReadOnlySpan<byte> luma, int width, int height)
+    {
+        var thumb = new byte[Width * Height];
+        for (int cy = 0; cy < Height; cy++)
+        {
+            int y0 = cy * height / Height, y1 = Math.Max(y0 + 1, (cy + 1) * height / Height);
+            for (int cx = 0; cx < Width; cx++)
+            {
+                int x0 = cx * width / Width, x1 = Math.Max(x0 + 1, (cx + 1) * width / Width);
+                long sum = 0, n = 0;
+                for (int y = y0; y < y1; y += Step)
+                    for (int x = x0; x < x1; x += Step, n++)
+                        sum += luma[y * width + x];
+                thumb[cy * Width + cx] = (byte)(sum / n);
+            }
+        }
+        return thumb;
+    }
+
+    /// <summary>Mean absolute difference of two thumbnails, in luma levels.</summary>
+    public static double Change(byte[] a, byte[] b)
+    {
+        long sum = 0;
+        for (int i = 0; i < a.Length; i++) sum += Math.Abs(a[i] - b[i]);
+        return (double)sum / a.Length;
+    }
+}
 
 /// <summary>
 /// Turns variable-rate captured frames into a constant-rate output. Grid tick k (time t0 + k/fps) shows the most
@@ -76,12 +118,13 @@ public sealed class GridResampler(double fps, double? originMs = null)
 }
 
 /// <summary>
-/// Writes video_frames.csv: <c>frame_index,t_grid_qpc_ms,t_source_qpc_ms,duplicate</c>, one row per video frame.
+/// Writes video_frames.csv: <c>frame_index,t_grid_qpc_ms,t_source_qpc_ms,duplicate,picture_change</c>, one row per video
+/// frame; picture_change is empty where not measured.
 /// Read by <see cref="VideoFrameLogReader"/>; pinned by dotnet/fixtures/video_frames.csv.
 /// </summary>
 public sealed class VideoFrameLogWriter(TextWriter writer) : IDisposable
 {
-    public const string Header = "frame_index,t_grid_qpc_ms,t_source_qpc_ms,duplicate";
+    public const string Header = "frame_index,t_grid_qpc_ms,t_source_qpc_ms,duplicate,picture_change";
     private bool _headerWritten;
 
     public void Write(GridTick t)
@@ -92,7 +135,8 @@ public sealed class VideoFrameLogWriter(TextWriter writer) : IDisposable
             _headerWritten = true;
         }
         writer.Write(string.Join(",", t.Index.ToString(CultureInfo.InvariantCulture), InputLogWriter.Num(t.TGridMs),
-            InputLogWriter.Num(t.TSourceMs), t.Duplicate ? "1" : "0") + "\n");
+            InputLogWriter.Num(t.TSourceMs), t.Duplicate ? "1" : "0",
+            t.PictureChange is double c ? InputLogWriter.Num(c) : "") + "\n");
     }
 
     public void Flush() => writer.Flush();
@@ -105,6 +149,7 @@ public static class VideoFrameLogReader
     {
         var (_, rows) = Csv.ReadFile(path);
         return rows.Select(r => new GridTick(long.Parse(r["frame_index"], CultureInfo.InvariantCulture),
-            Frames.ParseDouble(r["t_grid_qpc_ms"]), Frames.ParseDouble(r["t_source_qpc_ms"]), r["duplicate"] == "1")).ToList();
+            Frames.ParseDouble(r["t_grid_qpc_ms"]), Frames.ParseDouble(r["t_source_qpc_ms"]), r["duplicate"] == "1",
+            PictureChange: r.GetValueOrDefault("picture_change") is { Length: > 0 } c ? Frames.ParseDouble(c) : null)).ToList();
     }
 }

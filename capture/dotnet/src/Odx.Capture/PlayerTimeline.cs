@@ -49,8 +49,10 @@ public static class PlayerTimeline
     public static void WriteEvents(string path, IEnumerable<JsonObject> events) =>
         File.WriteAllLines(path, events.Select(e => e.ToJsonString(AgentMessage.Json)));
 
+    public const string RoundEventsFile = "events.jsonl";
+
     /// <summary>
-    /// annotations/events.jsonl of a player's round folder (the episode's event timeline): the round's server events (raw/server_events.jsonl) on this player's video,
+    /// raw/events.jsonl of a player's round folder (not part of the episode: the client takes no events): the round's server events (raw/server_events.jsonl) on this player's video,
     /// with the fields of the client's multiplayer delivery: when the event's notice reached this machine
     /// (local_receive_utc, local_receive_time_us; absent when it never did) and the server time on this machine's clock
     /// (server_time_as_local_us, from player.json's offset). Fields are in the sample's order, its times to the microsecond,
@@ -69,8 +71,7 @@ public static class PlayerTimeline
         var frameUtc = recorded && ServerClock(captureDir, round.TimePort) is { } clock ? FrameUtc(captureDir, clock.Map) : null;
         double? offsetMs = PlayerFile.OffsetMs(captureDir);
         long last = 0;
-        string path = Path.Combine(captureDir, Episode.EventsFile);
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        string path = CaptureFolder.Raw(captureDir, RoundEventsFile);
         WriteEvents(path, events.Select(e =>
         {
             var copy = new JsonObject();

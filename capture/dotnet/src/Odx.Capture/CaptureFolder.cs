@@ -10,7 +10,7 @@ namespace Odx.Capture;
 public static class CaptureFolder
 {
     public const string RawDir = "raw";
-    /// <summary>The episode's files at the top of the folder; its subfolders (videos/, streams/, metadata/, annotations/) stay as they are.</summary>
+    /// <summary>The episode's files at the top of the folder; its subfolders (videos/, streams/, metadata/) stay as they are.</summary>
     public static readonly string[] Delivered = [Episode.FileName, Episode.FramesFile, Episode.SensorsFile];
 
     /// <summary>Where raw files are: raw/ once the folder is tidied, else the folder itself.</summary>
@@ -45,6 +45,14 @@ public static class CaptureFolder
         {
             string name = Path.GetFileName(file);
             if (!Delivered.Contains(name)) File.Move(file, Path.Combine(raw, name), overwrite: true);
+        }
+        // Builds up to 0.3.10 put the round's events in the episode (annotations/); the client takes none (2026-11-27).
+        string annotations = Path.Combine(dir, "annotations");
+        if (Directory.Exists(annotations))
+        {
+            string events = Path.Combine(annotations, PlayerTimeline.RoundEventsFile);
+            if (File.Exists(events)) File.Move(events, Path.Combine(raw, PlayerTimeline.RoundEventsFile), overwrite: true);
+            if (!Directory.EnumerateFileSystemEntries(annotations).Any()) Directory.Delete(annotations);
         }
         Episode.Seal(dir);
     }

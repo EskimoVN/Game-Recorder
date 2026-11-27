@@ -62,6 +62,22 @@ public static class SessionBuilder
         int width = Required<int>(recording, "width"), height = Required<int>(recording, "height");
         var camera = ReadCamera(cameraDir ?? captureDir);
         var cameras = camera is { } c ? CameraPerFrame(c.Info, c.Samples, frames, width, height) : null;
+        PoseLag.Result? lag = null;
+        double? poseOffsetMs = null;
+        // The recorder measures the picture change (video_frames.csv); a log without it has the video decoded instead.
+        if (camera is { } cam && (frames.All(f => f.PictureChange is not null)
+                ? [.. frames.Select(f => f.PictureChange!.Value)]
+                : PoseLag.PictureChange(CaptureFolder.Video(captureDir))) is { } change)
+        {
+            lag = PoseLag.Measure(PoseLag.CameraMotion([.. cameras!.Select(x => x?.C2w)]), change, fps);
+            if (lag is not null)
+            {
+                // TIM-06: the pose is moved onto the picture's time, so each frame gets the pose its picture shows.
+                poseOffsetMs = lag.LagFrames * 1000 / fps;
+                camera = (cam.Info, [.. cam.Samples.Select(x => x with { TQpcMs = x.TQpcMs + poseOffsetMs.Value })]);
+                cameras = CameraPerFrame(cam.Info, camera.Value.Samples, frames, width, height);
+            }
+        }
         var rows = frames.Select((f, i) => new FrameRow(i,
             (long)Math.Round(f.TGridMs - times[0]), cameras?[i]?.C2w, cameras?[i] is null ? null : cameras.Model,
             cameras?[i]?.Intrinsics, inputs[i])).ToList();
@@ -117,7 +133,8 @@ public static class SessionBuilder
             .Select(x => (x.Item1, x.Item2.C2w, x.Item2.Intrinsics)).ToList();
         Episode.Write(captureDir, new EpisodeSource(captureId, sessionId, fps, width, height, rows, frameUtc,
             ActionsWithin(mapped, times[0], times[^1]).Select(e => (clockMap.ToUnixMs(e.TQpcMs), e)).ToList(),
-            cameraStream, cameras?.Model, profile, playerJson, SyncAccuracyMs(clock, frames, camera?.Samples)), config);
+            cameraStream, cameras?.Model, profile, playerJson, SyncAccuracyMs(frames, camera?.Samples, lag, fps),
+            poseOffsetMs, clock.UtcErrorMs), config);
         return new BuildReport(sessionId, frames.Count, durationMs, unbound, cameras?.Count(c => c is not null) ?? 0, clock, gridOriginOffset);
     }
 
@@ -250,13 +267,15 @@ public static class SessionBuilder
     }
 
     /// <summary>
-    /// TIM-05 (our reading, capture/README.md): the UTC map's error plus the 95th percentile over frames of how far the
-    /// picture (source time) and the pose (its sample's time) are from the frame's timestamp (grid time). Null when the
-    /// UTC error is not measured.
+    /// TIM-05 (our reading, capture/README.md): how well the video, the actions and the pose agree, as the root sum of squares
+    /// of two independent parts: the 95th percentile over frames of how far the picture (source time) and the pose (its
+    /// sample's time) are from the frame's timestamp, and the 95th percentile of how far the pose → picture lag of each
+    /// window strays from the one corrected (<see cref="PoseLag"/>). Null with a pose whose lag could not be measured
+    /// (TIM-09: missing synchronization stays unknown). The UTC error is not part of it (games.json alignment).
     /// </summary>
-    private static double? SyncAccuracyMs(ClockSync clock, List<GridTick> frames, List<CameraSample>? samples)
+    private static double? SyncAccuracyMs(List<GridTick> frames, List<CameraSample>? samples, PoseLag.Result? lag, double fps)
     {
-        if (clock.UtcErrorMs is not double utc) return null;
+        if (samples is not null && lag is null) return null;
         var offsets = new List<double>(frames.Count);
         int j = -1;
         foreach (var f in frames)
@@ -267,7 +286,9 @@ public static class SessionBuilder
             offsets.Add(offset);
         }
         offsets.Sort();
-        return utc + offsets[(int)Math.Ceiling(0.95 * offsets.Count) - 1];
+        double frame = offsets[(int)Math.Ceiling(0.95 * offsets.Count) - 1];
+        double spread = lag is null ? 0 : lag.SpreadFrames * 1000 / fps;
+        return Math.Sqrt(frame * frame + spread * spread);
     }
 
     private static double Median(IEnumerable<double> values)

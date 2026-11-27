@@ -187,9 +187,9 @@ public sealed class LocalRoundTests
         foreach (string dir in kept.SkipLast(1))
         {
             // FakeCapture copies a built v2 session instead of building one, so there is no episode.json here.
-            foreach (string f in new[] { Episode.EventsFile, "raw/session.json", "raw/frames.csv", "raw/video_frames.csv" })
+            foreach (string f in new[] { "raw/" + PlayerTimeline.RoundEventsFile, "raw/session.json", "raw/frames.csv", "raw/video_frames.csv" })
                 Assert.True(File.Exists(Path.Combine(dir, f)), Path.Combine(dir, f));
-            Assert.All(File.ReadLines(Path.Combine(dir, Episode.EventsFile)), l => Assert.NotNull(JsonNode.Parse(l)!["local_receive_time_us"]));
+            Assert.All(File.ReadLines(CaptureFolder.Raw(dir, PlayerTimeline.RoundEventsFile)), l => Assert.NotNull(JsonNode.Parse(l)!["local_receive_time_us"]));
             var listed = JsonNode.Parse(File.ReadAllText(Path.Combine(dir, CaptureFolder.RawDir, Manifest.FileName)))!["files"]!.AsArray()
                 .Select(f => f!.AsObject()).ToList();
             Assert.Equal(Directory.GetFiles(dir, "*", SearchOption.AllDirectories).Length - 1, listed.Count);
