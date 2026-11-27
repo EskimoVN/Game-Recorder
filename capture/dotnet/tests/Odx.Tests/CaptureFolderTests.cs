@@ -65,10 +65,10 @@ public class CaptureFolderTests
             Assert.Equal("cap-0001", (string?)episode["recording_id"]);
             Assert.Equal("r01", (string?)episode["session_id"]);
             Assert.Null(episode["replaces_item_id"]);
-            Assert.Equal(2.0, episode["duration_s"]!.GetValue<double>(), 9);
+            Assert.Equal(2.0, episode["duration_s"]!.GetValue<double>(), 6);  // frame times are whole microseconds
             long startNs = Episode.Ns(UtcAtT0);
             Assert.Equal(startNs, episode["clock"]!["capture_start_ns"]!.GetValue<long>());
-            Assert.Equal(startNs + 2_000_000_000, episode["clock"]!["capture_end_ns"]!.GetValue<long>());
+            Assert.InRange(episode["clock"]!["capture_end_ns"]!.GetValue<long>(), startNs + 1_999_999_000, startNs + 2_000_001_000);
             var camera = episode["cameras"]!.AsArray().Single()!;
             Assert.True(camera["is_primary"]!.GetValue<bool>());
             Assert.Equal(Frames, camera["frame_count"]!.GetValue<int>());
@@ -91,6 +91,7 @@ public class CaptureFolderTests
             Assert.Equal(startNs, frames[0].timestamp_ns);
             Assert.Equal(16_667_000, frames[1].timestamp_ns - frames[0].timestamp_ns);
             Assert.All(frames, f => Assert.True(f.image_valid));
+            Assert.All(frames, f => Assert.True(f.pose_valid));
             Assert.All(frames, f => Assert.Equal(1.7, f.C2W_M23!.Value, 9));
             Assert.All(frames, f => Assert.Null(f.camera_radial_k1));
             Assert.Equal("W", frames[30].input_keys);
@@ -115,12 +116,15 @@ public class CaptureFolderTests
             Assert.Equal("pinhole", (string?)sensor["camera_model"]);
             Assert.Equal("camera_to_world", (string?)sensor["extrinsics"]!["direction"]);
 
-            Directory.CreateDirectory(Path.Combine(dir, "annotations"));
-            File.WriteAllText(Path.Combine(dir, Episode.EventsFile), "{}\n");
-            Episode.Seal(dir);
-            var events = JsonNode.Parse(File.ReadAllText(Path.Combine(dir, Episode.FileName)))!["artifacts"]!.AsArray()
-                .Single(a => (string?)a!["path"] == Episode.EventsFile)!;
-            Assert.Equal(3, events["size_bytes"]!.GetValue<long>());
+            Assert.Equal(false, (bool?)games["capabilities"]!["has_events"]);
+            Assert.Equal(true, (bool?)games["capabilities"]!["has_camera_pose"]);
+            Assert.NotNull(games["signals"]!["actions"]!["dx"]);
+            Assert.Null(games["task"]!["task_id"]);
+
+            File.WriteAllText(CaptureFolder.Raw(dir, PlayerTimeline.RoundEventsFile), "{}\n");
+            Episode.Seal(dir);  // the round's events stay in raw/: not an artifact
+            Assert.DoesNotContain(JsonNode.Parse(File.ReadAllText(Path.Combine(dir, Episode.FileName)))!["artifacts"]!.AsArray(),
+                a => ((string)a!["path"]!).Contains("events"));
 
             new Odx.Protocol.RoundRecord("r01", "m1", "Arma 3", null, 1, 0, null, 12300,
                 [new("p2", "Bob"), new("p1", "Alice")]).Save(CaptureFolder.RawFolder(dir));
@@ -129,6 +133,7 @@ public class CaptureFolderTests
             games = JsonNode.Parse(File.ReadAllText(Path.Combine(dir, Episode.MetadataFile)))!;
             Assert.Equal(["p1", "p2"], games["participants"]!.AsArray().Select(p => (string?)p!["player_id"]));
             Assert.Null(games["participants"]![1]!["camera_id"]);
+            Assert.Equal(("r01", "m1"), ((string?)games["task"]!["task_id"], (string?)games["task"]!["match_id"]));
             var metadata = JsonNode.Parse(File.ReadAllText(Path.Combine(dir, Episode.FileName)))!["domain_metadata"]!;
             Assert.Equal(new FileInfo(Path.Combine(dir, Episode.MetadataFile)).Length, metadata["size_bytes"]!.GetValue<long>());
         }
@@ -168,6 +173,7 @@ public class CaptureFolderTests
         public long timestamp_ns { get; set; }
         public long camera_frame_index { get; set; }
         public bool image_valid { get; set; }
+        public bool pose_valid { get; set; }
         public double? C2W_M23 { get; set; }
         public double? camera_radial_k1 { get; set; }
         public string? input_keys { get; set; }
@@ -210,7 +216,7 @@ public class CaptureFolderTests
             long last = PlayerTimeline.WriteRoundEvents(dir, new RoundRecord("s", "m", "Game", null, 1, start, null, 12300, []),
                 new Dictionary<long, double> { [7] = UtcAtT0 + 510.25 });
 
-            var events = File.ReadLines(Path.Combine(dir, Episode.EventsFile)).Select(l => JsonNode.Parse(l)!.AsObject()).ToList();
+            var events = File.ReadLines(CaptureFolder.Raw(dir, PlayerTimeline.RoundEventsFile)).Select(l => JsonNode.Parse(l)!.AsObject()).ToList();
             Assert.Equal(500.0, events[0]["video_time_ms"]!.GetValue<double>(), 3);
             Assert.Equal(0.5, events[0]["time_s"]!.GetValue<double>(), 6);
             Assert.Equal(["event_id", "type", "server_time_us", "local_receive_utc", "local_receive_time_us",
@@ -247,7 +253,7 @@ public class CaptureFolderTests
 
             long last = PlayerTimeline.WriteRoundEvents(dir, new RoundRecord("s", "m", "Game", null, 1, start, null, 12300, []));
 
-            var events = File.ReadLines(Path.Combine(dir, Episode.EventsFile)).Select(l => JsonNode.Parse(l)!.AsObject()).ToList();
+            var events = File.ReadLines(CaptureFolder.Raw(dir, PlayerTimeline.RoundEventsFile)).Select(l => JsonNode.Parse(l)!.AsObject()).ToList();
             Assert.Equal(7, last);
             Assert.Equal(["event_id", "type"], events[0].Select(kv => kv.Key));
         }

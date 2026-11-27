@@ -5,6 +5,7 @@
 // extractor DLL's camera_samples.csv + extractor.json (default: the capture folder; without them the camera columns are
 // null). Exit code 1 if the folder cannot be built.
 
+using System.Text.Json.Nodes;
 using Odx.Capture;
 using Odx.Core;
 
@@ -43,7 +44,8 @@ public static class BuildCommand
             }
             var config = CaptureConfig.Load();
             if (vendor is not null) config = config with { VendorName = vendor };
-            var report = SessionBuilder.Build(dir, GameProfile.Load(profilePath), config, cameraDir);
+            var (player, sessionId) = EarlierIdentity(dir);
+            var report = SessionBuilder.Build(dir, GameProfile.Load(profilePath), config, cameraDir, player, sessionId);
             CaptureFolder.Tidy(dir);
             Console.WriteLine($"built {report.SessionId}: {report.FrameCount} frames, {report.DurationMs / 1000:F1} s, " +
                               $"camera on {report.CameraFrames} frames");
@@ -61,5 +63,19 @@ public static class BuildCommand
             Console.Error.WriteLine($"cannot build {dir}: {e.Message}");
             return 1;
         }
+    }
+
+    /// <summary>
+    /// A folder built before (in a room) keeps its player and the round's session_id: player.json and session.json hold
+    /// them, which odx build alone cannot know.
+    /// </summary>
+    private static (PlayerIdentity? Player, string? SessionId) EarlierIdentity(string dir)
+    {
+        string playerPath = CaptureFolder.Find(dir, PlayerFile.FileName), sessionPath = CaptureFolder.Find(dir, "session.json");
+        var player = File.Exists(playerPath) ? JsonNode.Parse(File.ReadAllText(playerPath))?["player"] : null;
+        string? sessionId = File.Exists(sessionPath) ? (string?)JsonNode.Parse(File.ReadAllText(sessionPath))?["session_id"] : null;
+        return (player?["player_id"] is JsonValue id && player["name"] is JsonValue name
+            ? new PlayerIdentity(id.GetValue<string>(), name.GetValue<string>())
+            : null, sessionId);
     }
 }
