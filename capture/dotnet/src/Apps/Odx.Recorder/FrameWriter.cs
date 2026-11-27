@@ -87,9 +87,15 @@ internal sealed class FrameWriter
     {
         foreach (var (frame, ticks) in _queue.GetConsumingEnumerable())
         {
-            var thumbnail = PictureThumbnail.FromLuma(frame ?? _black, _width, _height);
-            double change = _lastThumbnail is null ? 0 : PictureThumbnail.Change(_lastThumbnail, thumbnail);
-            _lastThumbnail = thumbnail;
+            // Only frames that reach the video count: one with no ticks was dropped by the grid (or never read), and
+            // comparing with it would measure a few ms of change instead of a whole video frame's.
+            double change = 0;
+            if (ticks.Count > 0)
+            {
+                var thumbnail = PictureThumbnail.FromLuma(frame ?? _black, _width, _height);
+                if (_lastThumbnail is not null) change = PictureThumbnail.Change(_lastThumbnail, thumbnail);
+                _lastThumbnail = thumbnail;
+            }
             foreach (var t in ticks)
             {
                 if (_error is not null) break;
