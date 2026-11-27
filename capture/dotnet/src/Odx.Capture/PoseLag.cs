@@ -58,7 +58,10 @@ public static class PoseLag
         return motion;
     }
 
-    /// <summary>Mean absolute grey change per frame of the video at 64×36; null when ffmpeg cannot read it.</summary>
+    /// <summary>
+    /// Mean absolute grey change per frame of the video at 64×36, for frame logs without picture_change (before 0.3.12);
+    /// null when ffmpeg cannot read it (the bundled one has no H.264 decoder: such rounds are rebuilt with a full ffmpeg).
+    /// </summary>
     public static List<double>? PictureChange(string video)
     {
         if (!File.Exists(video)) return null;
