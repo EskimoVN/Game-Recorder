@@ -11,8 +11,11 @@ public static class PoseLag
 {
     public const int Width = 64, Height = 36;
     public const double WindowS = 10;
-    /// <summary>Windows whose correlation peak is weaker than this are left out (nothing moved).</summary>
-    public const double MinCorrelation = 0.3;
+    /// <summary>
+    /// Windows whose correlation peak is weaker than this are left out (too little movement to tell): on 0.5.0 rounds the
+    /// windows between 0.3 and 0.5 gave lags of 5–6 frames against 0 for the rest, and blew sync_accuracy_ns up to 250 ms.
+    /// </summary>
+    public const double MinCorrelation = 0.5;
     private const int Span = 6;
 
     /// <param name="LagFrames">Median over the usable windows; + the pose is ahead of the picture.</param>
@@ -32,7 +35,8 @@ public static class PoseLag
             int len = Math.Min(win, n - w0);
             if (len <= 2 * Span) continue;
             var (lag, r) = Peak(cameraMotion.Skip(w0).Take(len).ToArray(), pictureChange.Skip(w0).Take(len).ToArray());
-            if (r >= MinCorrelation) lags.Add(lag);
+            // A peak at the edge of the search is no peak: the lag lies outside it or there is none.
+            if (r >= MinCorrelation && Math.Abs(lag) < Span) lags.Add(lag);
         }
         if (lags.Count == 0) return null;
         double median = Median(lags);

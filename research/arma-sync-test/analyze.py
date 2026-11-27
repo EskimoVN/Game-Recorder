@@ -23,7 +23,7 @@ import sys
 W, H = 64, 36
 STILL = 0.3       # mean absolute grey difference below which two frames count as the same picture
 MOVED = 1e-4      # rad of yaw + pitch change per frame above which the camera counts as moving
-MIN_R = 0.3       # windows whose correlation peak is weaker than this are left out (nothing moved)
+MIN_R = 0.5       # windows whose correlation peak is weaker than this are left out (too little movement to tell; as odx build)
 
 
 def find(d, name):
@@ -142,7 +142,7 @@ def analyse(d, window_s):
             vs = [x for x in view[w0:w0 + win] if x]
             v = max(set(vs), key=vs.count) if vs else None
         windows.append((w0 / fps, lag, r, mlag, v))
-    good = [w for w in windows if w[2] >= MIN_R]
+    good = [w for w in windows if w[2] >= MIN_R and abs(w[1]) < 6]  # a peak at the search's edge is none
     lags = [w[1] for w in good]
     typical = statistics.median(lags) if lags else float("nan")
 
@@ -158,7 +158,7 @@ def analyse(d, window_s):
               f"windows {min(lags):+.2f} .. {max(lags):+.2f} ({len(lags)} of {len(windows)} usable)")
     print(f"   mouse>cam  median {statistics.median(w[3] for w in windows):+.2f} frames (game latency)")
     for t, lag, r, mlag, v in windows:
-        if r >= MIN_R and abs(lag - typical) > 1:
+        if r >= MIN_R and abs(lag) < 6 and abs(lag - typical) > 1:
             print(f"   ! {t:6.0f} s  cam>video {lag:+.2f} (r {r:.2f})" + (f"  view {v}" if v else ""))
     if view:
         shares = {k: view.count(k) for k in set(view) if k}
